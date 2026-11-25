@@ -49,7 +49,7 @@ Tags: **Known** = documented by the vendor. **Guess** = reasoned but not yet tes
 
 - **Known.** Without a Developer ID, the app can't be notarized. A downloaded build gets blocked the first time it opens. macOS 15 needs System Settings › Privacy & Security › "Open Anyway".
 - **What we do instead:**
-  1. On launch and every 6 hours, the app checks `api.github.com/repos/ntschetterNYP/ptz-flow/releases/latest`. If the release is newer, it shows a banner with a **direct link to the GitHub release**. It never installs anything itself, and it doesn't nag while recording.
+  1. On launch and every 6 hours, the app checks `api.github.com/repos/ntschetterNY/ptz-flow/releases/latest`. If the release is newer, it shows a banner with a **direct link to the GitHub release**. It never installs anything itself, and it doesn't nag while recording.
   2. The easiest update is `scripts/update-from-source.sh`. It pulls, rebuilds and replaces the app on the Mac. Apps built locally aren't quarantined, so there's no Gatekeeper prompt.
   3. Publishing a release on GitHub runs `.github/workflows/release.yml`, which builds a zip and attaches it to the release, for anyone who'd rather download it.
 - Later, with a Developer ID ($99/yr), we can switch to Sparkle for one-click signed updates.

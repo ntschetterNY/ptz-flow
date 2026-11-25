@@ -12,7 +12,7 @@ enum FocusMode: String, CaseIterable, Identifiable {
 @MainActor
 final class AppModel: ObservableObject {
     // Change these if the GitHub repository is renamed or moved.
-    static let githubOwner = "ntschetterNYP"
+    static let githubOwner = "ntschetterNY"
     static let githubRepo = "ptz-flow"
 
     @Published var cameraHost: String = UserDefaults.standard.string(forKey: "cameraHost") ?? ""

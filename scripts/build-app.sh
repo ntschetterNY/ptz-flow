@@ -23,7 +23,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
   <key>CFBundleName</key><string>PTZ Flow</string>
   <key>CFBundleDisplayName</key><string>PTZ Flow</string>
-  <key>CFBundleIdentifier</key><string>io.github.ntschetternyp.ptzflow</string>
+  <key>CFBundleIdentifier</key><string>io.github.ntschetterny.ptzflow</string>
   <key>CFBundleExecutable</key><string>PTZFlow</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>

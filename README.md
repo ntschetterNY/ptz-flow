@@ -26,7 +26,7 @@ Early starter. It compiles and its unit tests run on GitHub Actions (macOS). **I
 You need macOS 14+ and Xcode (or `xcode-select --install`).
 
 ```bash
-git clone https://github.com/ntschetterNYP/ptz-flow.git
+git clone https://github.com/ntschetterNY/ptz-flow.git
 cd ptz-flow
 scripts/build-app.sh          # builds build/PTZ Flow.app
 cp -R "build/PTZ Flow.app" /Applications/
