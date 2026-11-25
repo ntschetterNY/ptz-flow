@@ -21,7 +21,7 @@ Tags: **Known** = documented by the vendor. **Guess** = reasoned but not yet tes
 
 ## 3. Which camera this is
 
-- **Guess.** There's no "P20X Ultra" in BirdDog's lineup. The closest match is the **BirdDog X1 Ultra** (X1U), a 20× PTZ. BirdDog's X1-series VISCA page covers "X1 · X1U · X1 Max · X1 30x". ([x1]) **To confirm:** the model and firmware shown on the camera's web page.
+- **Confirmed by Nathan:** the camera is a **BirdDog X1 Ultra** (X1U), a 20× PTZ. BirdDog's X1-series VISCA page covers "X1 · X1U · X1 Max · X1 30x". ([x1])
 
 ## 4. Getting the scene from Ecamm / Stream Deck
 

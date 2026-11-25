@@ -34,11 +34,23 @@ cp -R "build/PTZ Flow.app" /Applications/
 
 Then enter the camera's IP address in the app and press **Connect**. VISCA over IP has to be enabled on the camera (UDP 52381).
 
-### Stream Deck
+### Stream Deck setup (Stream Deck → PTZ Flow → Ecamm + camera)
 
-Install the free **Web Requests** plugin, and set a key to `GET http://127.0.0.1:7350/scene/Sermon`. PTZ Flow switches Ecamm to "Sermon" and runs the move mapped to that scene. Other routes are `/move/<id>`, `/stop` and `/status`.
+1. In the Stream Deck app, open the Marketplace and install **Web Requests** (by Adrian Mullings).
+2. Drag its **HTTP** action onto a key. Set the method to `GET` and the URL to `http://127.0.0.1:7350/scene/Sermon`. Make one key per scene, and write spaces as `%20`.
+3. Remove the old Ecamm scene action from those keys. PTZ Flow switches the Ecamm scene itself.
+4. In Ecamm, remove the camera-preset recall from each scene, so the camera isn't moved twice.
+5. Turn on AppleScript in Ecamm › Preferences › Remote Control. The first time PTZ Flow switches a scene, macOS asks "PTZ Flow wants to control Ecamm Live". Click **Allow**.
+6. In PTZ Flow, give each move the matching Ecamm scene name, spelled exactly as it is in Ecamm.
 
-Remove the camera-preset recall from your Ecamm scenes, so the camera isn't moved twice.
+PTZ Flow has to be running. To check that it's listening, open `http://127.0.0.1:7350/status` in a browser on that Mac.
+
+| Route | What it does |
+| --- | --- |
+| `/scene/<name>` | switch Ecamm to `<name>` and run the move mapped to it |
+| `/move/<id>` | run a move without touching Ecamm |
+| `/stop` | hold the camera where it is |
+| `/status` | JSON status |
 
 ## Updating
 
