@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTZ Flow research notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0B0D10;--text:#E8EAED;--muted:#A3AAB6;--line:#2A2F39;--panel:#171A20}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,sans-serif}
+main{max-width:820px;margin:0 auto;padding:40px 16px 64px}
+a{color:#8AB6FF}a:hover{color:#B5D0FF}
+h1{font-size:32px;line-height:1.2}h2{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);font-size:22px}
+code{background:var(--panel);padding:1px 5px;border-radius:4px;font-size:.9em;overflow-wrap:anywhere}
+strong{color:#fff}
+li{margin:6px 0}
+nav{display:flex;gap:16px;flex-wrap:wrap;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<nav><a href="./">← Back to the mockup</a><a href="https://github.com/ntschetterNYP/ptz-flow">Source on GitHub</a></nav>
+<h1>Research notes: what we know and what we still need to test</h1>
+<p>Tags: <strong>Known</strong> = documented by the vendor. <strong>Guess</strong> = reasoned but not yet tested on the church&#39;s gear.</p>
+<h2>1. Why preset recalls look jerky today</h2>
+<ul>
+<li><strong>Known.</strong> VISCA-over-IP preset recall on BirdDog X1-series cameras (<code>81 01 04 3F 02 pp FF</code>) has <strong>no speed setting</strong>. The camera jumps at its own speed profile. (<a href="https://birddog.tv/x1-series-visca-over-ip-commands/">BirdDog X1 VISCA commands</a>)</li>
+<li><strong>Known.</strong> NDI&#39;s PTZ messages <em>do</em> allow a recall speed (<code>ntk_ptz_recall_preset index=&quot;0-99&quot; speed=&quot;0.0-1.0&quot;</code>, default 1.0 = fastest). (<a href="https://docs.ndi.video/all/developing-with-ndi/ndi-metadata/ptz-and-control-messages">NDI PTZ messages</a>)</li>
+<li><strong>Guess.</strong> Ecamm (or whatever recalls the preset today) probably uses the default fastest speed. Even a slow NDI recall is linear and can&#39;t ease in or out, and it can&#39;t play a custom start-to-end path. That&#39;s why PTZ Flow streams small speed commands instead.</li>
+</ul>
+<p><strong>Quick win you can try today (Guess):</strong> if your controller lets you set a recall speed, a slower NDI recall will already look better, even before PTZ Flow exists.</p>
+<h2>2. How PTZ Flow drives the camera smoothly</h2>
+<ul>
+<li><strong>Known.</strong> BirdDog X1 cameras accept VISCA over IP on <strong>UDP port 52381</strong>. (<a href="https://birddog.tv/x1-series-visca-over-ip-commands/">x1</a>)</li>
+<li><strong>Known.</strong> There&#39;s an <em>extended</em> pan/tilt drive with <strong>0–255 speed steps</strong> (<code>81 01 06 11 0V 0V 0W 0W 0p 0q FF</code>), compared with 1–24 for the standard drive. Extended zoom has 16 steps (<code>81 01 04 07 0A 0p 0q FF</code>). (<a href="https://birddog.tv/x1-series-visca-over-ip-commands/">x1</a>)</li>
+<li><strong>Known.</strong> The camera reports where it is: the pan/tilt inquiry (<code>81 09 06 12 FF</code>) and the zoom inquiry (<code>81 09 04 47 FF</code>, range 0–0x4000). (<a href="https://birddog.tv/x1-series-visca-over-ip-commands/">x1</a>)</li>
+<li><strong>Known.</strong> NDI PTZ has speed and absolute commands, but it documents <strong>no way to read the position back</strong>. (<a href="https://docs.ndi.video/all/developing-with-ndi/ndi-metadata/ptz-and-control-messages">ndi</a>) So VISCA is the better control channel, and NDI stays for video.</li>
+<li><strong>Guess.</strong> The plan is a 20 Hz loop. Each tick it reads the position, works out where the camera should be on the easing curve, and sends <code>feed-forward speed + correction</code>. The big unknown is how evenly the camera moves at the lowest speed steps. <strong>This is the first thing to test</strong> (see <code>MotionCalibration</code> in <code>Sources/PTZFlowCore/MoveEngine.swift</code>).</li>
+<li><strong>Guess.</strong> The speed-to-velocity numbers in <code>MotionCalibration</code> are placeholders. A calibration routine needs to measure the real ones.</li>
+</ul>
+<h2>3. Which camera this is</h2>
+<ul>
+<li><strong>Guess.</strong> There&#39;s no &quot;P20X Ultra&quot; in BirdDog&#39;s lineup. The closest match is the <strong>BirdDog X1 Ultra</strong> (X1U), a 20× PTZ. BirdDog&#39;s X1-series VISCA page covers &quot;X1 · X1U · X1 Max · X1 30x&quot;. (<a href="https://birddog.tv/x1-series-visca-over-ip-commands/">x1</a>) <strong>To confirm:</strong> the model and firmware shown on the camera&#39;s web page.</li>
+</ul>
+<h2>4. Getting the scene from Ecamm / Stream Deck</h2>
+<ul>
+<li><strong>Known.</strong> Ecamm Live has a <strong>Remote Control API</strong>. It&#39;s HTTP, found over Bonjour (<code>_ecammliveremote._tcp</code>, shown as &quot;Ecamm Live Remote&quot;), on a <strong>port that changes every launch</strong>. Each client app has to be approved in Ecamm › Preferences › Remote Control. It can select a scene and read the current production. (<a href="https://support.ecamm.com/en/articles/17683976-automating-ecamm">Automating Ecamm</a>, <a href="https://bitfocus.io/connections/ecamm-live">Bitfocus Companion module</a>)</li>
+<li><strong>Known (third-party).</strong> Bitfocus Companion says the API shouldn&#39;t be polled faster than every <strong>2 seconds</strong>, so a scene change made inside Ecamm is only seen on the next poll. (<a href="https://bitfocus.io/connections/ecamm-live">bitfocus</a>) That&#39;s too slow to trigger a camera move.</li>
+<li><strong>Known.</strong> Ecamm supports <strong>AppleScript</strong> (<code>set scene name &quot;…&quot;</code>) and <strong>Shortcuts</strong> actions such as &quot;Switch Scene&quot; (macOS 13+). (<a href="https://support.ecamm.com/en/articles/17683976-automating-ecamm">ecamm</a>)</li>
+<li><strong>Known.</strong> The Stream Deck <strong>Web Requests</strong> plugin sends HTTP or WebSocket requests from a key. (<a href="https://marketplace.elgato.com/product/web-requests-d7d46868-f9c8-4fa5-b775-ab3b9a7c8add">Web Requests</a>) Elgato&#39;s SDK (TypeScript) also lets us ship our own plugin later. (<a href="https://docs.elgato.com/streamdeck/sdk/guides/system">Elgato SDK</a>)</li>
+</ul>
+<p><strong>Recommended order:</strong> Stream Deck key → <code>GET http://127.0.0.1:7350/scene/Sermon</code> → PTZ Flow switches Ecamm (AppleScript) <strong>and</strong> starts the move at the same moment. No polling delay, and Ecamm no longer moves the camera itself. <strong>To do:</strong> remove the camera-preset recall from each Ecamm scene, so the camera isn&#39;t moved twice.</p>
+<p><strong>Fallback (Guess):</strong> PTZ Flow could also watch Ecamm&#39;s API every 2 s, to catch scene changes made by clicking in Ecamm.</p>
+<h2>5. AI tracking (later phase)</h2>
+<ul>
+<li><strong>Known.</strong> Apple&#39;s Vision framework detects people and body poses on-device, using the Neural Engine on Apple Silicon.</li>
+<li><strong>Guess.</strong> The smoothness comes from the follow logic: a dead zone, then a damped follow. Tracking pauses during programmed moves.</li>
+<li>Needs the <strong>NDI SDK for macOS</strong> (free download from ndi.video) to receive the video. It isn&#39;t bundled here yet.</li>
+</ul>
+<h2>6. Smoother auto focus</h2>
+<ul>
+<li><strong>Known.</strong> VISCA gives us auto/manual mode (<code>81 01 04 38 02/03 FF</code>), a <strong>one-push AF trigger</strong> (<code>81 01 04 18 01 FF</code>), AF zone (top/center/bottom/all/left/right) and AF sensitivity. (<a href="https://birddog.tv/x1-series-visca-over-ip-commands/">x1</a>)</li>
+<li><strong>Implemented (to test).</strong> <em>Smooth auto</em> switches to manual focus during a move and back to auto 0.5 s after it lands. <em>One-push</em> stays manual and fires one AF after each move. Setting the AF zone to <strong>center</strong> and sensitivity to <strong>low</strong> on the camera should also cut down on hunting (Guess).</li>
+</ul>
+<h2>7. Updates without an Apple Developer account</h2>
+<ul>
+<li><strong>Known.</strong> Without a Developer ID, the app can&#39;t be notarized. A downloaded build gets blocked the first time it opens. macOS 15 needs System Settings › Privacy &amp; Security › &quot;Open Anyway&quot;.</li>
+<li><strong>What we do instead:</strong><ol>
+<li>On launch and every 6 hours, the app checks <code>api.github.com/repos/ntschetterNYP/ptz-flow/releases/latest</code>. If the release is newer, it shows a banner with a <strong>direct link to the GitHub release</strong>. It never installs anything itself, and it doesn&#39;t nag while recording.</li>
+<li>The easiest update is <code>scripts/update-from-source.sh</code>. It pulls, rebuilds and replaces the app on the Mac. Apps built locally aren&#39;t quarantined, so there&#39;s no Gatekeeper prompt.</li>
+<li>Publishing a release on GitHub runs <code>.github/workflows/release.yml</code>, which builds a zip and attaches it to the release, for anyone who&#39;d rather download it.</li>
+</ol>
+</li>
+<li>Later, with a Developer ID ($99/yr), we can switch to Sparkle for one-click signed updates.</li>
+</ul>
+
+</main>
+</body>
+</html>

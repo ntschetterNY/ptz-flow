@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTZ Flow mockup</title>
+<meta name="description" content="Interactive mockup of PTZ Flow, a Mac app for smooth, eased PTZ camera moves triggered from Ecamm Live and Stream Deck.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0B0D10;--win:#12151A;--panel:#171A20;--panel2:#1E222A;--line:#2A2F39;--text:#E8EAED;--muted:#A3AAB6;--accent:#5B9BFF;--accentInk:#0B1A33;--ok:#3DD68C;--orange:#FF9F43}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Inter,system-ui,sans-serif}
+a{color:#8AB6FF}a:hover{color:#B5D0FF}
+button{font:inherit;color:inherit;cursor:pointer}
+input[type=range]{accent-color:var(--accent);width:100%}
+.wrap{padding:16px}
+.win{max-width:1560px;margin:0 auto;background:var(--win);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.dots{display:flex;gap:8px}.dots span{width:12px;height:12px;border-radius:50%}
+.pill{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:var(--panel2);border:1px solid var(--line)}
+.led{width:8px;height:8px;border-radius:50%;display:inline-block}
+.muted{color:var(--muted)}
+.update{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:10px 16px;background:#13233D;border-bottom:1px solid #24406B}
+.btn{min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #2F3643;background:#232833}
+.btn.primary{background:var(--accent);border:none;color:var(--accentInk);font-weight:600;text-decoration:none;display:inline-flex;align-items:center}
+.btn.ghost{background:transparent;border-color:#3A5A8C;color:#DCE7F7}
+.cols{display:flex;flex-wrap:wrap;gap:16px;padding:16px;align-items:flex-start}
+.col-l{flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:10px}
+.col-c{flex:999 1 620px;min-width:0;display:flex;flex-direction:column;gap:12px}
+.col-r{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:12px}
+h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.move{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.move.active{border-color:var(--accent);background:#17233A}
+.move .top{display:flex;align-items:center;gap:8px}
+.move .name{flex-grow:1;font-weight:600}
+.iconbtn{width:36px;height:36px;border-radius:8px;border:1px solid #2F3643;background:#232833;display:flex;align-items:center;justify-content:center}
+.chips{display:flex;flex-wrap:wrap;gap:6px;font-size:12px}
+.chip{padding:2px 8px;border-radius:99px;background:#232833;color:#C8CDD6}
+.chip.ecamm{background:#2E2416;color:#FFC58A}
+.track{height:3px;border-radius:2px;background:#232833;overflow:hidden}.track>div{height:100%;background:var(--accent);width:0}
+.preview{position:relative;aspect-ratio:16/9;background:#2E2A25;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.stage{position:absolute;inset:0;transform-origin:50% 50%}
+.stage div{position:absolute}
+.tag{background:rgba(0,0,0,.65);font-size:12px;padding:4px 8px;border-radius:6px}
+.row{display:flex;flex-wrap:wrap;gap:12px;align-items:stretch}
+.readouts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;font-variant-numeric:tabular-nums}
+.readouts small{display:block;font-size:11px;color:var(--muted)}.readouts b{font-size:18px}
+.joy{position:relative;width:150px;height:150px;border-radius:50%;border:1px solid #343B48;background:var(--panel2);touch-action:none;flex-shrink:0;padding:0}
+.joy .knob{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;background:var(--accent);box-shadow:0 4px 14px rgba(0,0,0,.45);pointer-events:none}
+.joy .h,.joy .v{position:absolute;background:#2F3643;pointer-events:none}.joy .v{left:50%;top:8px;bottom:8px;width:1px}.joy .h{top:50%;left:8px;right:8px;height:1px}
+label.sl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.keys{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.key{aspect-ratio:1/1;min-height:48px;border-radius:10px;border:2px solid var(--line);background:#050607;font-size:11px;font-weight:600;padding:4px}
+.key.on{border-color:var(--orange)}
+.log{display:flex;flex-direction:column;gap:4px;background:var(--win);border-radius:8px;padding:8px;min-height:120px;font-size:12px}
+.log span.t{color:#7F8794;font-variant-numeric:tabular-nums;margin-right:8px}
+.switch{width:52px;height:30px;border-radius:99px;border:none;background:#3A4250;position:relative;padding:0}
+.switch span{position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;transition:left .15s}
+.switch[aria-pressed=true]{background:#2FA56E}.switch[aria-pressed=true] span{left:25px}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;background:var(--win);padding:4px;border-radius:8px}
+.seg button{min-height:36px;border-radius:6px;border:none;background:transparent;color:#C8CDD6;font-weight:600;font-size:12px}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accentInk)}
+.rec{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #3A4250;background:var(--panel2);color:#FFD0D0;font-weight:600}
+.rec[aria-pressed=true]{background:#3A1214;border-color:#FF5C5C}
+.foot{max-width:1560px;margin:16px auto 0;color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:8px 20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="win">
+  <div class="bar">
+    <div class="dots" aria-hidden="true"><span style="background:#FF5F57"></span><span style="background:#FEBC2E"></span><span style="background:#28C840"></span></div>
+    <strong style="font-size:15px">PTZ Flow</strong>
+    <div class="pill"><span class="led" style="background:var(--ok)"></span>BirdDog X1 Ultra <span class="muted">VISCA-over-IP · NDI</span></div>
+    <div class="pill"><span class="led" style="background:var(--orange)"></span>Ecamm Live <span class="muted">Scene: <span id="scene">Walk-in</span></span></div>
+    <div style="flex-grow:1"></div>
+    <button class="rec" id="rec" aria-pressed="false"><span class="led" style="width:10px;height:10px;background:#FF5C5C"></span><span id="recLabel">Record</span><span id="recTime" style="color:#FFB4B4;font-variant-numeric:tabular-nums">00:00:00</span></button>
+  </div>
+
+  <div class="update" id="update">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8AB6FF" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"></path></svg>
+    <div style="flex:1 1 420px;min-width:0"><strong>PTZ Flow 0.2.0 is available on GitHub.</strong> <span style="color:#C9D6EA">You're on 0.1.0. Download it from the release page, or run <code>scripts/update-from-source.sh</code>. Never shown while recording.</span></div>
+    <button class="btn ghost" id="later">Later</button>
+    <a class="btn primary" href="https://github.com/ntschetterNYP/ptz-flow/releases" target="_blank" rel="noopener">Open on GitHub</a>
+  </div>
+
+  <div class="cols">
+    <section class="col-l" aria-label="Moves">
+      <h2>Moves</h2>
+      <div id="moves" style="display:flex;flex-direction:column;gap:10px"></div>
+    </section>
+
+    <section class="col-c" aria-label="Camera">
+      <div class="preview">
+        <div class="stage" id="stage" aria-hidden="true">
+          <div style="left:-150%;width:400%;top:-150%;height:218%;background:#2E2A25"></div>
+          <div style="left:36%;top:8%;width:28%;height:28%;background:#18263C;border:3px solid #3B3328"></div>
+          <div style="left:40%;top:14%;width:20%;height:4%;background:#2D4468;border-radius:3px"></div>
+          <div style="left:44%;top:21%;width:12%;height:3%;background:#243856;border-radius:3px"></div>
+          <div style="left:-150%;width:400%;top:68%;height:200%;background:#3D3127"></div>
+          <div style="left:6%;top:52%;width:15%;height:17%;background:#23495A;border-radius:6px 6px 2px 2px"></div>
+          <div style="left:41%;top:54%;width:6%;height:10.6%;border-radius:50%;background:#4A3A2E"></div>
+          <div style="left:28.6%;top:40%;width:2.8%;height:5%;border-radius:50%;background:#C79A78"></div>
+          <div style="left:27.7%;top:45.2%;width:4.6%;height:23%;border-radius:24px 24px 4px 4px;background:#4E5D73"></div>
+          <div id="head" style="left:58.6%;top:39%;width:2.8%;height:5%;border-radius:50%;background:#B98A68"></div>
+          <div id="body" style="left:57.6%;top:44.2%;width:4.8%;height:24%;border-radius:24px 24px 4px 4px;background:#2F3A4C"></div>
+          <div style="left:56.5%;top:51%;width:7%;height:17.4%;background:#6B5240;border-radius:3px"></div>
+        </div>
+        <div id="dz" hidden style="position:absolute;top:12%;bottom:12%;border:1px dashed rgba(255,255,255,.35);border-radius:6px"></div>
+        <div id="box" hidden style="position:absolute;border:2px solid var(--ok);border-radius:4px"><span style="position:absolute;top:-22px;left:-2px;background:var(--ok);color:#062414;font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap">Pastor · locked</span></div>
+        <div style="position:absolute;left:12px;top:12px" class="tag">NDI preview · CAM 1</div>
+        <div style="position:absolute;right:12px;bottom:12px;font-variant-numeric:tabular-nums" class="tag" id="status">Holding</div>
+      </div>
+
+      <div class="row">
+        <div class="card" style="flex:1 1 300px;flex-direction:row;align-items:center;gap:14px">
+          <svg width="120" height="60" viewBox="0 0 120 60" role="img" aria-label="Easing curve of the current move"><rect width="120" height="60" rx="6" fill="#12151A"></rect><path id="curve" fill="none" stroke="#5B9BFF" stroke-width="2"></path><circle id="dot" r="4" fill="#E8EAED"></circle></svg>
+          <div style="flex-grow:1;min-width:0"><div class="muted" style="font-size:12px" id="caption">Last move</div><div style="font-weight:600" id="moveName">Full stage wide</div><div class="track" style="height:4px;margin-top:4px"><div id="prog"></div></div></div>
+          <button class="btn" id="hold">Hold</button>
+        </div>
+        <div class="card readouts" style="flex:1 1 260px;display:grid">
+          <div><small>PAN</small><b id="rPan">0.0°</b></div><div><small>TILT</small><b id="rTilt">0.0°</b></div><div><small>ZOOM</small><b id="rZoom">1.0×</b></div><div><small>FOCUS</small><b id="rFocus">AF·S</b></div>
+        </div>
+      </div>
+
+      <div class="card" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:12px">
+        <button class="joy" id="joy" aria-label="Pan and tilt joystick. Drag, or use arrow keys."><span class="v"></span><span class="h"></span><span class="knob" id="knob"></span></button>
+        <div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:12px">
+          <div><label class="sl" for="zoom"><span>Zoom</span><span id="zLbl">1.0×</span></label><input id="zoom" type="range" min="1" max="4" step="0.01" value="1"></div>
+          <div><label class="sl" for="speed"><span>Joystick top speed</span><span id="spLbl">60%</span></label><input id="speed" type="range" min="10" max="100" value="60"></div>
+          <div><label class="sl" for="ramp"><span>Ramp (soft start and stop)</span><span id="rpLbl">55%</span></label><input id="ramp" type="range" min="0" max="100" value="55"></div>
+        </div>
+        <p class="muted" style="flex:1 1 200px;margin:0;font-size:12px">Small pushes creep, and the camera eases in and out. Zooming in slows the pan automatically, so tight shots stay calm.</p>
+      </div>
+    </section>
+
+    <section class="col-r" aria-label="Ecamm, tracking and focus">
+      <div class="card">
+        <h2>Stream Deck → PTZ Flow → Ecamm + camera</h2>
+        <div class="muted" style="font-size:12px">Press a key. PTZ Flow switches the Ecamm scene and starts the eased move at the same moment.</div>
+        <div class="keys" id="keys"></div>
+        <div class="log" id="log" aria-live="polite"></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px"><h2 style="flex-grow:1">AI tracking (on this Mac)</h2><button class="switch" id="trk" aria-pressed="false" aria-label="AI tracking"><span></span></button></div>
+        <div style="font-size:12px" class="muted" id="trkStatus">Off. The camera only moves when you or a scene tell it to.</div>
+        <div><label class="sl" for="dzR"><span>Dead zone (ignore small sways)</span><span id="dzLbl">12%</span></label><input id="dzR" type="range" min="2" max="30" value="12"></div>
+        <div><label class="sl" for="smR"><span>Smoothness</span><span id="smLbl">70%</span></label><input id="smR" type="range" min="0" max="95" value="70"></div>
+        <div class="muted" style="font-size:12px">Tracking pauses during a programmed move and picks back up when it lands.</div>
+      </div>
+      <div class="card">
+        <h2>Focus</h2>
+        <div class="seg" id="focus"><button data-f="manual" aria-pressed="false">Manual</button><button data-f="smooth" aria-pressed="true">Smooth auto</button><button data-f="onepush" aria-pressed="false">One-push</button></div>
+        <div class="muted" style="font-size:12px" id="focusHelp"></div>
+      </div>
+    </section>
+  </div>
+</div>
+<div class="foot"><span>Mockup only: the camera, Ecamm and tracking are simulated.</span><a href="notes.html">How it works and research notes</a><a href="https://github.com/ntschetterNYP/ptz-flow">Source on GitHub</a></div>
+</div>
+
+<script>
+(function () {
+  var EASES = {
+    inout: function (t) { return t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; },
+    gentle: function (t) { return t * t * t * (t * (t * 6 - 15) + 10); },
+    drift: function (t) { return -(Math.cos(Math.PI * t) - 1) / 2; },
+    linear: function (t) { return t; }
+  };
+  var LABELS = { inout: 'Ease in-out', gentle: 'Gentle S-curve', drift: 'Slow drift', linear: 'Linear' };
+  var FOCUS_HELP = {
+    manual: 'Focus stays where you set it. Same as today, as a fallback.',
+    smooth: 'Auto focus is held during moves and switched back on half a second after the camera lands, so it never hunts on air.',
+    onepush: 'The lens stays manual, and PTZ Flow fires one quick auto-focus each time a move lands.'
+  };
+  var FOCUS_SHORT = { manual: 'MF', smooth: 'AF·S', onepush: '1-push' };
+  var moves = [
+    { id: 'wide', name: 'Full stage wide', scene: 'Walk-in', end: { pan: 0, tilt: 0, zoom: 1 }, endLabel: 'Wide', dur: 4000, ease: 'inout' },
+    { id: 'worship', name: 'Worship leader', scene: 'Worship', end: { pan: -.2, tilt: .02, zoom: 2.1 }, endLabel: 'Leader mid shot', dur: 3500, ease: 'gentle' },
+    { id: 'pulpit', name: 'Pastor at pulpit', scene: 'Sermon', end: { pan: .1, tilt: .02, zoom: 2.6 }, endLabel: 'Pulpit medium', dur: 3500, ease: 'gentle' },
+    { id: 'prayer', name: 'Prayer slow push-in', scene: 'Prayer', start: { pan: .1, tilt: .04, zoom: 1.6 }, end: { pan: .1, tilt: -.03, zoom: 3.3 }, endLabel: 'Tight close-up', dur: 18000, ease: 'drift' },
+    { id: 'baptism', name: 'Baptism tank', scene: 'Baptism', end: { pan: -.36, tilt: .08, zoom: 2.3 }, endLabel: 'Tank medium', dur: 4500, ease: 'inout' }
+  ];
+  var S = { pan: 0, tilt: 0, zoom: 1, subjectX: .6, activeId: 'wide', runningId: null, progress: 1, ease: 'inout',
+    tracking: false, dz: .12, sm: .7, focus: 'smooth', rec: false, recSecs: 0, jx: 0, jy: 0, maxSpeed: 60, ramp: 55, scene: 'Walk-in' };
+  var queue = [], move = null, jogging = false, chasing = false;
+  var $ = function (id) { return document.getElementById(id); };
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+  function log(text, color) {
+    var d = new Date();
+    var row = document.createElement('div');
+    var t = document.createElement('span'); t.className = 't'; t.textContent = (d.getHours() % 12 || 12) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    var m = document.createElement('span'); m.style.color = color || '#C8CDD6'; m.textContent = text;
+    row.appendChild(t); row.appendChild(m);
+    var l = $('log'); l.insertBefore(row, l.firstChild);
+    while (l.children.length > 6) l.removeChild(l.lastChild);
+  }
+
+  function renderMoves() {
+    var host = $('moves'); host.textContent = '';
+    moves.forEach(function (p) {
+      var el = document.createElement('div');
+      el.className = 'move' + (p.id === S.activeId ? ' active' : '');
+      el.innerHTML = '<div class="top"><div class="name"></div><button class="iconbtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button></div>' +
+        '<div class="muted" style="font-size:12px"></div><div class="chips"><span class="chip"></span><span class="chip"></span><span class="chip ecamm"></span></div><div class="track"><div></div></div>';
+      el.querySelector('.name').textContent = p.name;
+      var b = el.querySelector('button'); b.setAttribute('aria-label', 'Run move ' + p.name);
+      b.onclick = function () { runMove(p.id, false); };
+      el.querySelector('.muted').textContent = (p.start ? 'Start point' : 'From where it is') + ' → ' + p.endLabel;
+      var chips = el.querySelectorAll('.chip');
+      chips[0].textContent = p.dur / 1000 + ' s'; chips[1].textContent = LABELS[p.ease]; chips[2].textContent = 'Ecamm: ' + p.scene;
+      p.bar = el.querySelector('.track > div');
+      p.bar.style.width = p.id === S.activeId ? '100%' : '0';
+      host.appendChild(el);
+    });
+  }
+
+  function renderKeys() {
+    var host = $('keys'); host.textContent = '';
+    moves.forEach(function (p) {
+      var k = document.createElement('button');
+      k.className = 'key' + (S.scene === p.scene ? ' on' : '');
+      k.textContent = p.scene;
+      k.onclick = function () { pressKey(p); };
+      host.appendChild(k);
+    });
+  }
+
+  function runMove(id, fromKey) {
+    var p = moves.filter(function (x) { return x.id === id; })[0];
+    queue = [];
+    if (p.start) queue.push({ to: p.start, dur: 1400, ease: 'inout', main: false, label: 'Repositioning to start point' });
+    queue.push({ to: p.end, dur: p.dur, ease: p.ease, main: true, label: fromKey ? 'Running from Stream Deck' : 'Running move' });
+    S.activeId = id; S.runningId = id; S.progress = 0;
+    $('moveName').textContent = p.name;
+    renderMoves();
+    move = null; next();
+  }
+
+  function next() {
+    var m = queue.shift();
+    if (!m) {
+      if (S.runningId) {
+        var p = moves.filter(function (x) { return x.id === S.runningId; })[0];
+        log('Arrived: ' + p.name + (S.tracking ? '. Tracking resumed' : '') + (S.focus === 'smooth' ? '. Focus settling' : ''), '#3DD68C');
+      }
+      S.runningId = null; S.progress = 1; $('caption').textContent = 'Last move';
+      return;
+    }
+    move = { to: m.to, dur: m.dur, ease: m.ease, main: m.main, from: { pan: S.pan, tilt: S.tilt, zoom: S.zoom }, t0: performance.now() };
+    S.ease = m.ease; $('caption').textContent = m.label; drawCurve();
+  }
+
+  function pressKey(p) {
+    log('Stream Deck key “' + p.scene + '” → PTZ Flow', '#C8CDD6');
+    setTimeout(function () {
+      S.scene = p.scene; $('scene').textContent = p.scene; renderKeys();
+      log('Ecamm scene → “' + p.scene + '” and move “' + p.name + '” started together', '#FFC58A');
+      runMove(p.id, true);
+    }, 60);
+  }
+
+  function drawCurve() {
+    var e = EASES[S.ease], pts = [];
+    for (var i = 0; i <= 30; i++) { var t = i / 30; pts.push((6 + t * 108).toFixed(1) + ' ' + (54 - e(t) * 48).toFixed(1)); }
+    $('curve').setAttribute('d', 'M ' + pts.join(' L '));
+  }
+
+  function stopAll() { queue = []; move = null; S.runningId = null; }
+
+  function step(now, dt) {
+    S.subjectX = .6 + .07 * Math.sin(now / 2700) + .025 * Math.sin(now / 830);
+    if (move) {
+      var p = clamp((now - move.t0) / move.dur, 0, 1), e = EASES[move.ease](p);
+      S.pan = move.from.pan + (move.to.pan - move.from.pan) * e;
+      S.tilt = move.from.tilt + (move.to.tilt - move.from.tilt) * e;
+      S.zoom = move.from.zoom + (move.to.zoom - move.from.zoom) * e;
+      if (move.main) S.progress = p;
+      if (p >= 1) { move = null; next(); }
+    } else if (jogging || Math.abs(S.jx) > .01 || Math.abs(S.jy) > .01) {
+      var ex = 1 + S.ramp / 100 * 2;
+      var vx = Math.sign(S.jx) * Math.pow(Math.abs(S.jx), ex), vy = Math.sign(S.jy) * Math.pow(Math.abs(S.jy), ex);
+      var sp = S.maxSpeed / 100 * .35 / S.zoom;
+      S.pan = clamp(S.pan + vx * sp * dt, -.5, .5); S.tilt = clamp(S.tilt + vy * sp * dt, -.3, .3);
+    } else if (S.tracking) {
+      var err = (S.subjectX - .5) - S.pan;
+      if (Math.abs(err * S.zoom) > S.dz || chasing) {
+        chasing = Math.abs(err * S.zoom) > S.dz * .25;
+        S.pan += err * Math.min(1, ((1 - S.sm) * 6 + .4) * dt);
+      }
+    }
+    if (S.rec) S.recSecs += dt;
+  }
+
+  function paint() {
+    $('stage').style.transform = 'scale(' + S.zoom.toFixed(4) + ') translate(' + (-S.pan * 100).toFixed(3) + '%,' + (-S.tilt * 100).toFixed(3) + '%)';
+    $('head').style.left = (S.subjectX * 100 - 1.4).toFixed(2) + '%';
+    $('body').style.left = (S.subjectX * 100 - 2.4).toFixed(2) + '%';
+    var prog = S.runningId ? S.progress : 1, e = EASES[S.ease];
+    $('dot').setAttribute('cx', (6 + prog * 108).toFixed(1)); $('dot').setAttribute('cy', (54 - e(prog) * 48).toFixed(1));
+    $('prog').style.width = Math.round(prog * 100) + '%';
+    moves.forEach(function (p) { if (p.bar && p.id === S.activeId) p.bar.style.width = Math.round(prog * 100) + '%'; });
+    var zx = (1 + (S.zoom - 1) / 3 * 19).toFixed(1);
+    $('rPan').textContent = (S.pan * 340).toFixed(1) + '°'; $('rTilt').textContent = (-S.tilt * 120).toFixed(1) + '°';
+    $('rZoom').textContent = zx + '×'; $('zLbl').textContent = zx + '×';
+    if (document.activeElement !== $('zoom')) $('zoom').value = S.zoom;
+    $('status').textContent = (S.runningId ? 'Moving' : S.tracking ? 'Tracking' : 'Holding') + ' · VISCA 20 Hz';
+    var showT = S.tracking;
+    $('dz').hidden = !showT; $('box').hidden = !showT;
+    if (showT) {
+      $('dz').style.left = ((.5 - S.dz) * 100) + '%'; $('dz').style.width = (S.dz * 200) + '%';
+      var sx = .5 + (S.subjectX - .5 - S.pan) * S.zoom, sy = .5 + (.415 - .5 - S.tilt) * S.zoom, bw = .07 * S.zoom;
+      var b = $('box').style; b.left = ((sx - bw / 2) * 100) + '%'; b.top = ((sy - .06 * S.zoom) * 100) + '%'; b.width = (bw * 100) + '%'; b.height = (.22 * S.zoom * 100) + '%';
+    }
+    var rs = Math.floor(S.recSecs);
+    $('recTime').textContent = pad(Math.floor(rs / 3600)) + ':' + pad(Math.floor(rs / 60) % 60) + ':' + pad(rs % 60);
+    $('knob').style.transform = 'translate(' + (S.jx * 49) + 'px,' + (S.jy * 49) + 'px)';
+  }
+
+  var last = performance.now();
+  function tick(now) { var dt = Math.min(.05, (now - last) / 1000); last = now; step(now, dt); paint(); requestAnimationFrame(tick); }
+
+  // Controls
+  $('hold').onclick = function () { stopAll(); log('Held position'); };
+  $('later').onclick = function () { $('update').hidden = true; };
+  $('rec').onclick = function () {
+    S.rec = !S.rec; if (S.rec) S.recSecs = 0;
+    this.setAttribute('aria-pressed', S.rec); $('recLabel').textContent = S.rec ? 'Stop recording' : 'Record';
+    if (S.rec) $('update').hidden = true;
+    log(S.rec ? 'Recording clean camera feed (ProRes)' : 'Recording saved to Movies › PTZ Flow', '#FFB4B4');
+  };
+  $('trk').onclick = function () {
+    S.tracking = !S.tracking; this.setAttribute('aria-pressed', S.tracking);
+    $('trkStatus').textContent = S.tracking ? 'Following Pastor · Apple Vision on-device · 30 fps' : 'Off. The camera only moves when you or a scene tell it to.';
+    $('trkStatus').style.color = S.tracking ? '#3DD68C' : '';
+    log(S.tracking ? 'AI tracking on: locked on Pastor' : 'AI tracking off', '#3DD68C');
+  };
+  $('dzR').oninput = function () { S.dz = this.value / 100; $('dzLbl').textContent = this.value + '%'; };
+  $('smR').oninput = function () { S.sm = this.value / 100; $('smLbl').textContent = this.value + '%'; };
+  $('speed').oninput = function () { S.maxSpeed = +this.value; $('spLbl').textContent = this.value + '%'; };
+  $('ramp').oninput = function () { S.ramp = +this.value; $('rpLbl').textContent = this.value + '%'; };
+  $('zoom').oninput = function () { stopAll(); S.zoom = parseFloat(this.value); };
+  Array.prototype.forEach.call(document.querySelectorAll('#focus button'), function (b) {
+    b.onclick = function () {
+      S.focus = b.dataset.f;
+      Array.prototype.forEach.call(document.querySelectorAll('#focus button'), function (o) { o.setAttribute('aria-pressed', o === b); });
+      $('focusHelp').textContent = FOCUS_HELP[S.focus]; $('rFocus').textContent = FOCUS_SHORT[S.focus];
+    };
+  });
+  var joy = $('joy');
+  function jogAt(e) {
+    var r = joy.getBoundingClientRect();
+    var x = (e.clientX - (r.left + r.width / 2)) / (r.width / 2 - 26), y = (e.clientY - (r.top + r.height / 2)) / (r.height / 2 - 26);
+    var m = Math.sqrt(x * x + y * y); if (m > 1) { x /= m; y /= m; }
+    S.jx = x; S.jy = y;
+  }
+  joy.addEventListener('pointerdown', function (e) { joy.setPointerCapture(e.pointerId); stopAll(); jogging = true; jogAt(e); });
+  joy.addEventListener('pointermove', function (e) { if (jogging) jogAt(e); });
+  function up() { jogging = false; S.jx = 0; S.jy = 0; }
+  joy.addEventListener('pointerup', up); joy.addEventListener('pointercancel', up);
+  joy.addEventListener('keydown', function (e) {
+    var d = .02 / S.zoom, m = { ArrowLeft: [-d, 0], ArrowRight: [d, 0], ArrowUp: [0, -d], ArrowDown: [0, d] }[e.key];
+    if (!m) return; e.preventDefault(); stopAll();
+    S.pan = clamp(S.pan + m[0], -.5, .5); S.tilt = clamp(S.tilt + m[1], -.3, .3);
+  });
+
+  $('focusHelp').textContent = FOCUS_HELP.smooth;
+  renderMoves(); renderKeys(); drawCurve();
+  log('Linked to Ecamm Live and the camera', '#A3AAB6');
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
