@@ -1,0 +1,28 @@
+name: Deploy site to Vercel
+
+# Publishes site/ (the mockup and research notes) to the Vercel project on every push to main.
+# Needs one repository secret: VERCEL_TOKEN (Vercel › Account Settings › Tokens).
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/deploy-site.yml']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_RobQeuYHeFoGSNE6TZpXiid7
+      VERCEL_PROJECT_ID: prj_fV0l4I5vswawnyLNwNt7UNVu0teJ
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy site/ to production
+        working-directory: site
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::Add a VERCEL_TOKEN repository secret to deploy the site."
+            exit 1
+          fi
+          npx --yes vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN"
