@@ -52,11 +52,11 @@ final class AppModel: ObservableObject {
 
     init() {
         moves = store.load()
-        selectedMoveID = moves.first?.id
         let settings = UserDefaults.standard.data(forKey: "trackingSettings")
             .flatMap { try? JSONDecoder().decode(TrackingSettings.self, from: $0) } ?? TrackingSettings()
         trackingSettings = settings
         tracker = TrackingController(settings: settings)
+        selectedMoveID = moves.first?.id
         video.onDetections = { [weak self] found in self?.observe(found) }
         video.findAndConnect(cameraHost: cameraHost)
         loadThumbnails()
