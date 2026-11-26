@@ -12,7 +12,7 @@ struct ContentView: View {
                 }
             }
             HStack(alignment: .top, spacing: 16) {
-                MovesColumn().frame(width: 300)
+                MovesColumn().frame(width: 320)
                 ControlColumn().frame(maxWidth: .infinity)
                 SideColumn().frame(width: 300)
             }
@@ -56,105 +56,205 @@ struct UpdateBanner: View {
     }
 }
 
+/// Left side, split in two: the four preset tiles (with a picture of where each one ends) on top,
+/// and the selected move's settings underneath.
 struct MovesColumn: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("MOVES").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button { model.addMove() } label: { Label("New move", systemImage: "plus") }
-                    .help("Adds a move whose end point (B) is where the camera is now")
-            }
-            List {
-                ForEach($model.moves) { $move in
-                    MoveCard(move: $move)
-                        .contextMenu {
-                            Button("Delete “\(move.name)”", role: .destructive) { model.deleteMove(move.id) }
-                        }
-                }
-            }
+        VSplitView {
+            PresetGrid()
+                .frame(minHeight: 220, idealHeight: 300)
+                .padding(.bottom, 8)
+            MoveEditor()
+                .frame(minHeight: 260)
+                .padding(.top, 8)
         }
     }
 }
 
-/// One move: A (optional start) → B (end), how long it takes, the curve, and what triggers it.
-struct MoveCard: View {
+struct PresetGrid: View {
     @EnvironmentObject var model: AppModel
-    @Binding var move: Move
+    private let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("PRESETS").font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(Array(model.moves.prefix(4).enumerated()), id: \.element.id) { index, move in
+                    PresetTile(number: index + 1, move: move)
+                }
+            }
+            Text("Click a tile to go there. Stream Deck: /preset/1 to /preset/4")
+                .font(.caption2).foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+struct PresetTile: View {
+    @EnvironmentObject var model: AppModel
+    let number: Int
+    let move: Move
+
+    var body: some View {
+        let selected = model.selectedMoveID == move.id
+        let running = model.runningMoveID == move.id
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .topLeading) {
+                Rectangle().fill(Color.black)
+                if let thumb = model.thumbnails[move.id] {
+                    Image(decorative: thumb, scale: 1).resizable().scaledToFill()
+                } else {
+                    Text("No picture yet.\nPress “Save end point”.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                Text("\(number)")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(running ? Color.green : Color.black.opacity(0.6)))
+                    .foregroundStyle(.white)
+                    .padding(4)
+                if running {
+                    VStack { Spacer(); ProgressView(value: model.progress).tint(.green) }.padding(4)
+                }
+            }
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2))
+            Text(move.name).font(.caption).lineLimit(1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.selectedMoveID = move.id
+            model.run(moveID: move.id)
+        }
+        .contextMenu {
+            Button("Save end point here") { model.captureEnd(for: move.id) }
+            Button("Edit") { model.selectedMoveID = move.id }
+        }
+        .accessibilityLabel("Preset \(number), \(move.name)")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Settings for the selected move. The common case is just: save an end point, pick a time, done.
+struct MoveEditor: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let i = model.moves.firstIndex(where: { $0.id == model.selectedMoveID }) {
+                MoveSettings(move: $model.moves[i], presetNumber: i < 4 ? i + 1 : nil)
+            } else {
+                Text("Select a preset or move").foregroundStyle(.secondary)
+            }
+            Divider()
             HStack {
+                Text("ALL MOVES").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button { model.addMove() } label: { Label("New", systemImage: "plus") }
+                    .buttonStyle(.borderless)
+                    .help("Adds a move that ends where the camera is now")
+            }
+            List(selection: $model.selectedMoveID) {
+                ForEach(Array(model.moves.enumerated()), id: \.element.id) { index, move in
+                    HStack {
+                        Text(index < 4 ? "\(index + 1)" : "·").monospacedDigit().foregroundStyle(.secondary).frame(width: 14)
+                        Text(move.name)
+                        Spacer()
+                        if let scene = move.ecammScene { Text(scene).font(.caption).foregroundStyle(.secondary) }
+                        Button { model.run(moveID: move.id) } label: { Image(systemName: "play.fill") }
+                            .buttonStyle(.borderless)
+                    }
+                    .tag(move.id)
+                    .contextMenu {
+                        Button("Delete “\(move.name)”", role: .destructive) { model.deleteMove(move.id) }
+                    }
+                }
+                .onMove { from, to in
+                    model.moves.move(fromOffsets: from, toOffset: to)
+                    model.saveMoves()
+                }
+            }
+            .frame(minHeight: 100)
+            Text("Drag to reorder. The first four are the preset tiles.").font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+}
+
+struct MoveSettings: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var move: Move
+    let presetNumber: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if let n = presetNumber { Text("\(n)").font(.caption.bold()).foregroundStyle(.secondary) }
                 TextField("Name", text: $move.name)
                     .textFieldStyle(.plain)
-                    .bold()
+                    .font(.headline)
                     .onSubmit { model.saveMoves() }
-                Spacer()
-                Button { model.run(moveID: move.id) } label: { Image(systemName: "play.fill") }
-                    .accessibilityLabel("Run \(move.name)")
             }
 
-            pointRow(label: "A", title: move.start == nil ? "From wherever the camera is" : "Start point set",
-                     isSet: move.start != nil,
-                     set: { model.captureStart(for: move.id) },
-                     go: move.start == nil ? nil : { model.goTo(.start, of: move.id) },
-                     clear: move.start == nil ? nil : { model.clearStart(for: move.id) })
-            pointRow(label: "B", title: "End point", isSet: true,
-                     set: { model.captureEnd(for: move.id) },
-                     go: { model.goTo(.end, of: move.id) },
-                     clear: nil)
+            HStack {
+                Button { model.captureEnd(for: move.id) } label: {
+                    Label("Save end point", systemImage: "scope")
+                }
+                .help("Use where the camera is pointing now (and grab a preview picture)")
+                Button { model.goTo(.end, of: move.id) } label: {
+                    Label("Go", systemImage: "arrow.right.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Glide straight to the end point")
+            }
 
             HStack {
-                Text("\(move.duration, specifier: "%.1f") s").monospacedDigit().frame(width: 44, alignment: .leading)
+                Text("Time").font(.caption)
                 Slider(value: $move.duration, in: 1...30, step: 0.5, onEditingChanged: { editing in
                     if !editing { model.saveMoves() }
                 })
+                Text("\(move.duration, specifier: "%.1f") s").font(.caption).monospacedDigit().frame(width: 40, alignment: .trailing)
             }
-            .font(.caption)
 
             HStack {
                 Picker("Curve", selection: $move.easing) {
                     ForEach(Easing.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-                .labelsHidden()
                 .onChange(of: move.easing) { _, _ in model.saveMoves() }
-                TextField("Ecamm scene", text: Binding(
-                    get: { move.ecammScene ?? "" },
-                    set: { move.ecammScene = $0.isEmpty ? nil : $0 }
-                ))
-                .onSubmit { model.saveMoves() }
             }
             .font(.caption)
+
+            TextField("Ecamm scene that triggers it (optional)", text: Binding(
+                get: { move.ecammScene ?? "" },
+                set: { move.ecammScene = $0.isEmpty ? nil : $0 }
+            ))
+            .font(.caption)
+            .onSubmit { model.saveMoves() }
 
             Toggle("Start AI tracking when it arrives", isOn: $move.trackAfterArriving)
                 .font(.caption)
                 .onChange(of: move.trackAfterArriving) { _, _ in model.saveMoves() }
 
-            if model.runningMoveID == move.id {
-                ProgressView(value: model.progress)
+            DisclosureGroup("Start point (optional)") {
+                HStack {
+                    Text(move.start == nil ? "None: starts from wherever the camera is" : "Set")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Save") { model.captureStart(for: move.id) }
+                    if move.start != nil {
+                        Button("Go") { model.goTo(.start, of: move.id) }
+                        Button("Clear") { model.clearStart(for: move.id) }
+                    }
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
             }
+            .font(.caption)
         }
-        .padding(.vertical, 4)
-    }
-
-    private func pointRow(label: String, title: String, isSet: Bool, set: @escaping () -> Void,
-                          go: (() -> Void)?, clear: (() -> Void)?) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.caption.bold())
-                .frame(width: 18, height: 18)
-                .background(Circle().fill(isSet ? Color.accentColor : Color.gray.opacity(0.4)))
-                .foregroundStyle(.white)
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            Button("Set", action: set).help("Use where the camera is now")
-            if let go { Button("Go", action: go).help("Glide there now") }
-            if let clear { Button(action: clear) { Image(systemName: "xmark") }.help("Start from wherever the camera is") }
-        }
-        .font(.caption)
-        .buttonStyle(.borderless)
     }
 }
 
@@ -316,6 +416,13 @@ struct PreviewPanel: View {
                 }
                 .frame(maxWidth: 320)
                 Button("Find") { video.findAndConnect(cameraHost: model.cameraHost) }
+                Picker("Quality", selection: $video.highQuality) {
+                    Text("Standard").tag(false)
+                    Text("High").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+                .help("High uses the camera's full-quality NDI stream: sharper, more network and CPU")
                 Spacer()
                 Text("NDI® is a registered trademark of Vizrt NDI AB.").font(.caption2).foregroundStyle(.tertiary)
             }

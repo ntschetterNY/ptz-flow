@@ -27,6 +27,14 @@ final class VideoPipeline: ObservableObject {
     @Published private(set) var sources: [NDISource] = []
     @Published private(set) var frame: CGImage?
     @Published private(set) var detections: [Detection] = []
+    /// NDI offers two streams: the camera's light proxy (Standard) or the full-quality stream (High).
+    @Published var highQuality: Bool = UserDefaults.standard.bool(forKey: "ndiHighQuality") {
+        didSet {
+            UserDefaults.standard.set(highQuality, forKey: "ndiHighQuality")
+            if let current = sources.first(where: { $0.name == selectedSourceName }) ?? currentSource { connect(to: current) }
+        }
+    }
+    private var currentSource: NDISource?
 
     /// Called with each analysed frame's detections (main actor).
     var onDetections: (([Detection]) -> Void)?
@@ -70,11 +78,12 @@ final class VideoPipeline: ObservableObject {
         }
         receiver?.stop()
         receiver = nil
-        guard let r = NDIReceiver(library: library, source: source) else {
+        guard let r = NDIReceiver(library: library, source: source, highQuality: highQuality) else {
             status = .failed("Couldn't open NDI source \(source.name)")
             return
         }
         selectedSourceName = source.name
+        currentSource = source
         receiver = r
         status = .receiving(source.name)
         r.start { [weak self] image in

@@ -8,6 +8,8 @@ public protocol PTZCamera: AnyObject, Sendable {
     func stopAll()
     func setAutoFocus(_ on: Bool)
     func onePushFocus()
+    /// Exact landing: the camera's own absolute position move, at a slow speed (1...24).
+    func moveAbsolute(to pose: Pose, speed: Int)
 }
 
 /// A BirdDog PTZ camera controlled over VISCA-over-IP.
@@ -34,9 +36,9 @@ public final class BirdDogCamera: PTZCamera, @unchecked Sendable {
         // One position query at a time: the move loop, tracking and "Set A/B" may all ask.
         await inquiries.acquire()
         defer { Task { await inquiries.release() } }
-        guard let ptReply = await client.inquire(VISCA.panTiltPositionInquiry),
+        guard let ptReply = await client.inquire(VISCA.panTiltPositionInquiry, replyLength: 11),
               let pt = VISCA.parsePanTilt(ptReply),
-              let zReply = await client.inquire(VISCA.zoomPositionInquiry),
+              let zReply = await client.inquire(VISCA.zoomPositionInquiry, replyLength: 7),
               let z = VISCA.parseZoom(zReply) else {
             return nil
         }
@@ -83,10 +85,13 @@ public final class BirdDogCamera: PTZCamera, @unchecked Sendable {
         client.command(VISCA.onePushAutoFocus)
     }
 
-    /// Quick, non-eased reposition (used before a move with a start point).
-    public func jump(to pose: Pose) {
-        client.command(VISCA.absolutePanTilt(pan: pose.pan, tilt: pose.tilt, panSpeed: 20, tiltSpeed: 18))
+    /// The camera's own absolute move: it servos to the exact position. Speed 1 (slowest) ... 24.
+    public func moveAbsolute(to pose: Pose, speed: Int) {
+        lock.lock(); defer { lock.unlock() }
+        lastPanTilt = (Int.min, Int.min) // next drive() must be sent
+        client.command(VISCA.absolutePanTilt(pan: pose.pan, tilt: pose.tilt, panSpeed: speed, tiltSpeed: min(speed, 21)))
         client.command(VISCA.zoomDirect(pose.zoom))
+        lastZoomSpeed = Int.min
     }
 }
 

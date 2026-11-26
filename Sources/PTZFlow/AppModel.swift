@@ -52,12 +52,14 @@ final class AppModel: ObservableObject {
 
     init() {
         moves = store.load()
+        selectedMoveID = moves.first?.id
         let settings = UserDefaults.standard.data(forKey: "trackingSettings")
             .flatMap { try? JSONDecoder().decode(TrackingSettings.self, from: $0) } ?? TrackingSettings()
         trackingSettings = settings
         tracker = TrackingController(settings: settings)
         video.onDetections = { [weak self] found in self?.observe(found) }
         video.findAndConnect(cameraHost: cameraHost)
+        loadThumbnails()
         startServer()
         if !cameraHost.isEmpty { connect() }
         Task { await checkForUpdates() }
@@ -74,7 +76,11 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(host, forKey: "cameraHost")
         let cam = BirdDogCamera(host: host)
         camera = cam
-        engine = MoveEngine(camera: cam)
+        let engine = MoveEngine(camera: cam, calibration: Self.loadCalibration())
+        engine.onCalibrationLearned = { c in
+            if let data = try? JSONEncoder().encode(c) { UserDefaults.standard.set(data, forKey: "motionCalibration") }
+        }
+        self.engine = engine
         Task {
             let pose = await cam.readPose()
             connected = pose != nil
@@ -85,24 +91,45 @@ final class AppModel: ObservableObject {
     }
 
     func run(moveID: String) {
-        guard let move = moves.first(where: { $0.id == moveID }), let engine, let camera else {
-            addLog("Can't run the move: camera not connected")
+        guard let move = moves.first(where: { $0.id == moveID }) else { return }
+        play(move, label: move.name, runningID: move.id)
+    }
+
+    /// Recall preset 1...4 (the first four moves).
+    func recallPreset(_ number: Int) {
+        guard number >= 1, number <= moves.count, number <= 4 else { return }
+        run(moveID: moves[number - 1].id)
+    }
+
+    /// The one path every move takes: Stream Deck, preset tiles, Play and Go all end up here.
+    private func play(_ move: Move, label: String, runningID: String?) {
+        guard let engine, let camera else {
+            addLog("Can't move: camera not connected")
             return
         }
         moveTask?.cancel()
-        runningMoveID = move.id
+        runningMoveID = runningID
         progress = 0
-        addLog("Running “\(move.name)”")
+        addLog("Going to “\(label)”")
         let focus = focusMode
         moveTask = Task { [weak self] in
             await self?.stopTracking(easeOut: true)
             if focus == .smoothAuto { camera.setAutoFocus(false) } // hold focus during the move
-            await engine.perform(move) { p in
+            let outcome = await engine.perform(move) { p in
                 Task { @MainActor in self?.progress = p }
             }
-            guard let self, !Task.isCancelled else { return }
-            self.runningMoveID = nil
-            self.addLog("Arrived: \(move.name)")
+            guard let self, !Task.isCancelled, outcome != .cancelled else { return }
+            if self.runningMoveID == runningID { self.runningMoveID = nil }
+            switch outcome {
+            case .arrived:
+                self.addLog("Arrived: \(label)")
+            case .sentWithoutFeedback:
+                self.addLog("Sent to “\(label)” (camera didn't report its position, so this wasn't checked)")
+            case let .stoppedShort(at):
+                self.addLog("“\(label)” stopped short at pan \(at.pan), tilt \(at.tilt), zoom \(at.zoom). Try Go again; if it repeats, re-save the end point.")
+            case .cancelled:
+                break
+            }
             if move.trackAfterArriving { self.startTracking() }
             switch focus {
             case .smoothAuto:
@@ -113,7 +140,17 @@ final class AppModel: ObservableObject {
             case .manual:
                 break
             }
+            // Keep the preset's preview picture current (after focus has settled).
+            if outcome == .arrived, let id = runningID, !move.trackAfterArriving {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                self.saveThumbnail(for: id)
+            }
         }
+    }
+
+    static func loadCalibration() -> MotionCalibration {
+        UserDefaults.standard.data(forKey: "motionCalibration")
+            .flatMap { try? JSONDecoder().decode(MotionCalibration.self, from: $0) } ?? MotionCalibration()
     }
 
     func stop() {
@@ -154,14 +191,18 @@ final class AppModel: ObservableObject {
 
     enum Point { case start, end }
 
-    /// Smoothly moves the camera to a move's start (A) or end (B) point, e.g. to check or adjust it.
+    /// Moves the camera to a move's end point (or its optional start point), the same way a preset does.
     func goTo(_ point: Point, of moveID: String) {
-        guard let move = moves.first(where: { $0.id == moveID }), let engine else { return }
-        guard let pose = point == .start ? move.start : move.end else { return }
-        moveTask?.cancel()
-        moveTask = Task { [weak self] in
-            await self?.stopTracking(easeOut: true)
-            await engine.moveTo(pose)
+        guard let move = moves.first(where: { $0.id == moveID }) else { return }
+        if point == .end {
+            var plain = move
+            plain.start = nil               // "Go" means: straight to the end point
+            plain.trackAfterArriving = false
+            plain.duration = min(move.duration, 4)
+            play(plain, label: move.name, runningID: move.id)
+        } else if let start = move.start {
+            let toStart = Move(id: move.id, name: move.name, end: start, duration: 2.5, easing: .silk)
+            play(toStart, label: "\(move.name) start", runningID: nil)
         }
     }
 
@@ -175,30 +216,70 @@ final class AppModel: ObservableObject {
     func addMove() {
         let move = Move.blank(named: "New move \(moves.count + 1)")
         moves.append(move)
+        selectedMoveID = move.id
         saveMoves()
         if camera != nil { captureEnd(for: move.id) }
     }
 
     func deleteMove(_ moveID: String) {
         moves.removeAll { $0.id == moveID }
+        thumbnails[moveID] = nil
+        thumbnailStore.delete(for: moveID)
+        if selectedMoveID == moveID { selectedMoveID = moves.first?.id }
         saveMoves()
     }
 
     /// Saves where the camera is now as the move's end point.
     func captureEnd(for moveID: String) {
-        guard let camera else { return }
+        guard let camera else {
+            addLog("Can't save the end point: camera not connected")
+            return
+        }
         Task {
-            guard let pose = await camera.readPose(), let i = moves.firstIndex(where: { $0.id == moveID }) else { return }
+            guard let i = moves.firstIndex(where: { $0.id == moveID }) else { return }
+            guard let pose = await readPoseReliably(camera) else {
+                addLog("Couldn't read the camera's position, so the end point for “\(moves[i].name)” was NOT saved. Try again.")
+                return
+            }
             moves[i].end = pose
             saveMoves()
-            addLog("Saved end point for “\(moves[i].name)”")
+            saveThumbnail(for: moveID)
+            addLog("Saved end point for “\(moves[i].name)” (pan \(pose.pan), tilt \(pose.tilt), zoom \(pose.zoom))")
+        }
+    }
+
+    private func readPoseReliably(_ camera: BirdDogCamera) async -> Pose? {
+        for _ in 0..<5 {
+            if let p = await camera.readPose() { return p }
+        }
+        return nil
+    }
+
+    // MARK: Preset pictures
+
+    @Published private(set) var thumbnails: [String: CGImage] = [:]
+    @Published var selectedMoveID: String?
+    private let thumbnailStore = ThumbnailStore()
+
+    private func saveThumbnail(for moveID: String) {
+        guard let frame = video.frame, let small = ThumbnailStore.scaled(frame, width: 480) else { return }
+        thumbnails[moveID] = small
+        thumbnailStore.save(small, for: moveID)
+    }
+
+    func loadThumbnails() {
+        for move in moves {
+            if let image = thumbnailStore.load(for: move.id) { thumbnails[move.id] = image }
         }
     }
 
     func captureStart(for moveID: String) {
         guard let camera else { return }
         Task {
-            guard let pose = await camera.readPose(), let i = moves.firstIndex(where: { $0.id == moveID }) else { return }
+            guard let pose = await readPoseReliably(camera), let i = moves.firstIndex(where: { $0.id == moveID }) else {
+                addLog("Couldn't read the camera's position; start point not saved")
+                return
+            }
             moves[i].start = pose
             saveMoves()
             addLog("Saved start point for “\(moves[i].name)”")
@@ -319,6 +400,10 @@ final class AppModel: ObservableObject {
         switch (route.first, route.count) {
         case ("scene", 2):
             trigger(scene: route[1])
+            return (200, #"{"ok":true}"#)
+        case ("preset", 2):
+            guard let n = Int(route[1]), n >= 1, n <= min(4, moves.count) else { return (404, #"{"error":"use /preset/1 to /preset/4"}"#) }
+            recallPreset(n)
             return (200, #"{"ok":true}"#)
         case ("move", 2):
             guard moves.contains(where: { $0.id == route[1] }) else { return (404, #"{"error":"unknown move"}"#) }

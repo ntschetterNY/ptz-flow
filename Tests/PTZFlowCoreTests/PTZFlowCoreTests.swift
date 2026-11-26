@@ -178,12 +178,11 @@ final class SilkTests: XCTestCase {
         c.latency = 0
         let engine = MoveEngine(camera: cam, calibration: c)
         let move = Move(id: "t", name: "t", end: Pose(pan: 400, tilt: -150, zoom: 0), duration: 3, easing: .silk)
-        await engine.perform(move)
-        let end = cam.pose
-        XCTAssertEqual(Double(end.pan), 400, accuracy: 25)
-        XCTAssertEqual(Double(end.tilt), -150, accuracy: 25)
+        let outcome = await engine.perform(move)
+        XCTAssertEqual(outcome, .arrived)
+        XCTAssertTrue(MotionMath.isOnTarget(cam.pose, move.end), "\(cam.pose)")
         // No speed change bigger than the acceleration limit allows.
-        let maxJump = zip(cam.panSpeeds, cam.panSpeeds.dropFirst()).map { abs($0 - $1) }.max() ?? 0
+        let maxJump = zip(cam.glideSpeeds, cam.glideSpeeds.dropFirst()).map { abs($0 - $1) }.max() ?? 0
         XCTAssertLessThanOrEqual(maxJump, Int(c.panTiltAcceleration / c.tickRate) + 2)
     }
 }
@@ -191,10 +190,16 @@ final class SilkTests: XCTestCase {
 /// A camera that integrates speed commands using the default calibration.
 final class SimulatedCamera: PTZCamera, @unchecked Sendable {
     private let lock = NSLock()
+    /// How much faster the real camera moves than the calibration assumes (1 = exactly as calibrated).
+    var speedScale = 1.0
+    /// Every Nth position read is "lost", like a dropped UDP reply.
+    var dropEvery = 0
+    private var reads = 0
+    private var absoluteTarget: Pose?
     private var p = (pan: 0.0, tilt: 0.0, zoom: 0.0)
     private var v = (pan: 0, tilt: 0, zoom: 0)
     private var lastUpdate = Date()
-    private(set) var panSpeeds: [Int] = []
+    private(set) var glideSpeeds: [Int] = []
     let c = MotionCalibration()
 
     var pose: Pose {
@@ -207,28 +212,86 @@ final class SimulatedCamera: PTZCamera, @unchecked Sendable {
         let now = Date()
         let dt = now.timeIntervalSince(lastUpdate)
         lastUpdate = now
-        p.pan += Double(v.pan) * c.panUnitsPerSecondPerStep * dt
-        p.tilt += Double(v.tilt) * c.tiltUnitsPerSecondPerStep * dt
-        p.zoom += Double(v.zoom) * c.zoomUnitsPerSecondPerStep * dt
+        if let t = absoluteTarget {
+            let step = 3000 * dt
+            func approach(_ x: Double, _ to: Int) -> Double {
+                let d = Double(to) - x
+                return abs(d) <= step ? Double(to) : x + (d > 0 ? step : -step)
+            }
+            p = (approach(p.pan, t.pan), approach(p.tilt, t.tilt), approach(p.zoom, t.zoom))
+            return
+        }
+        p.pan += Double(v.pan) * c.panUnitsPerSecondPerStep * speedScale * dt
+        p.tilt += Double(v.tilt) * c.tiltUnitsPerSecondPerStep * speedScale * dt
+        p.zoom += Double(v.zoom) * c.zoomUnitsPerSecondPerStep * speedScale * dt
     }
 
-    func readPose() async -> Pose? { pose }
+    func readPose() async -> Pose? {
+        lock.lock()
+        reads += 1
+        let drop = dropEvery > 0 && reads % dropEvery == 0
+        lock.unlock()
+        return drop ? nil : pose
+    }
+
+    func moveAbsolute(to pose: Pose, speed: Int) {
+        lock.lock(); defer { lock.unlock() }
+        integrate()
+        v = (0, 0, 0)
+        absoluteTarget = pose
+    }
 
     func drive(panSpeed: Int, tiltSpeed: Int, zoomSpeed: Int) {
         lock.lock(); defer { lock.unlock() }
         integrate()
+        absoluteTarget = nil
         v = (panSpeed, tiltSpeed, zoomSpeed)
-        panSpeeds.append(panSpeed)
+        glideSpeeds.append(panSpeed)
     }
 
     func stopAll() {
         lock.lock(); defer { lock.unlock() }
         integrate()
         v = (0, 0, 0)
+        absoluteTarget = nil
     }
 
     func setAutoFocus(_ on: Bool) {}
     func onePushFocus() {}
+}
+
+final class LandingTests: XCTestCase {
+    /// The calibration is a guess. Even when the camera is twice as fast as assumed, and some position
+    /// replies are lost, a move must end exactly on the end point.
+    func testLandsExactlyEvenWhenCalibrationIsWrong() async {
+        let cam = SimulatedCamera()
+        cam.speedScale = 2
+        cam.dropEvery = 5
+        var c = MotionCalibration()
+        c.tickRate = 50
+        let engine = MoveEngine(camera: cam, calibration: c)
+        let move = Move(id: "t", name: "t", end: Pose(pan: -600, tilt: 220, zoom: 3000), duration: 1.5, easing: .silk)
+        let outcome = await engine.perform(move)
+        XCTAssertEqual(outcome, .arrived)
+        XCTAssertTrue(MotionMath.isOnTarget(cam.pose, move.end), "\(cam.pose)")
+        // And it learned that the camera is faster than assumed.
+        XCTAssertGreaterThan(engine.calibration.panUnitsPerSecondPerStep, MotionCalibration().panUnitsPerSecondPerStep)
+    }
+
+    func testAlreadyThereJustLands() async {
+        let cam = SimulatedCamera()
+        let engine = MoveEngine(camera: cam)
+        let outcome = await engine.moveTo(.home)
+        XCTAssertEqual(outcome, .arrived)
+        XCTAssertTrue(cam.glideSpeeds.allSatisfy { $0 == 0 })
+    }
+
+    func testLearnerIgnoresTinyMoves() {
+        var l = CalibrationLearner(start: .home)
+        l.commanded(MotionMath.Command(panStep: 1, tiltStep: 0, zoomStep: 0), dt: 0.05)
+        l.observe(Pose(pan: 50, tilt: 0, zoom: 0))
+        XCTAssertEqual(l.updated(MotionCalibration()), MotionCalibration())
+    }
 }
 
 final class TrackingTests: XCTestCase {

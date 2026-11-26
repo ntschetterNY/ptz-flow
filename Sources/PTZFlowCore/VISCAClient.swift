@@ -6,7 +6,8 @@ public final class VISCAClient: @unchecked Sendable {
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "ptzflow.visca")
     private var sequence: UInt32 = 0
-    private var waiter: (([UInt8]) -> Void)?
+    /// The pending inquiry: the reply length it expects, and who to hand it to.
+    private var waiter: (length: Int, deliver: ([UInt8]) -> Void)?
 
     public init(host: String, port: UInt16 = VISCA.defaultPort) {
         connection = NWConnection(
@@ -35,7 +36,9 @@ public final class VISCAClient: @unchecked Sendable {
     }
 
     /// Sends an inquiry and waits for its `90 50 ...` reply, or nil after `timeout` seconds.
-    public func inquire(_ payload: [UInt8], timeout: TimeInterval = 0.15) async -> [UInt8]? {
+    /// `replyLength` filters out a late reply to an earlier inquiry (e.g. a zoom reply arriving while we wait
+    /// for pan/tilt), which used to make a position read fail and a move give up.
+    public func inquire(_ payload: [UInt8], replyLength: Int? = nil, timeout: TimeInterval = 0.25) async -> [UInt8]? {
         await withCheckedContinuation { (continuation: CheckedContinuation<[UInt8]?, Never>) in
             queue.async {
                 let once = Once()
@@ -44,7 +47,7 @@ public final class VISCAClient: @unchecked Sendable {
                     once.done = true
                     continuation.resume(returning: reply)
                 }
-                self.waiter = { finish($0) }
+                self.waiter = (replyLength ?? 0, { finish($0) })
                 self.sequence &+= 1
                 self.sendRaw(VISCA.packet(.inquiry, payload: payload, sequence: self.sequence))
                 self.queue.asyncAfter(deadline: .now() + timeout) {
@@ -75,10 +78,10 @@ public final class VISCAClient: @unchecked Sendable {
 
     /// Runs on `queue`. ACKs (`90 4y FF`) and completions (`90 5y FF`) are ignored; only inquiry replies are passed on.
     private func handle(_ payload: [UInt8]) {
-        guard payload.count > 3, payload[1] == 0x50 else { return }
-        let w = waiter
+        guard payload.count > 3, payload[1] == 0x50, let w = waiter else { return }
+        if w.length > 0 && payload.count != w.length { return } // stale reply to an earlier inquiry
         waiter = nil
-        w?(payload)
+        w.deliver(payload)
     }
 }
 

@@ -39,12 +39,14 @@ Then enter the camera's IP address in the app and press **Connect**. VISCA over 
 
 For the preview and AI tracking, install the free **NDI SDK for Apple** (ndi.video → For Developers → NDI SDK, pick *Apple*). PTZ Flow finds `libndi.dylib` in `/Library/NDI SDK for Apple/lib/macOS/` on its own; without it the app still runs, just without video. NDI® is a registered trademark of Vizrt NDI AB.
 
-### Setting up a move (A → B)
+### Presets and moves
 
-1. Jog the camera to where the shot should **end** and press **Set** on the **B** row.
-2. Optional: jog to where it should **start** and press **Set** on **A**. Without an A, the move starts from wherever the camera is.
-3. Pick a duration and a curve. **Silk** has no kick at either end (zero velocity, acceleration and jerk).
-4. Type the Ecamm scene name, and tick *Start AI tracking when it arrives* for shots like the sermon.
+The left side is split: four **preset tiles** on top (each shows a picture of where it ends), and the selected move's settings below.
+
+1. Jog the camera to the shot and press **Save end point**. That also grabs the tile's picture.
+2. Pick a time and a curve. **Silk** has no kick at either end.
+3. Click the tile (or press **Go**) to glide there. Every move finishes with the camera's own exact position move, so it always lands on the saved point.
+4. Optionally type the Ecamm scene name, and tick *Start AI tracking when it arrives* for shots like the sermon. A start point is optional and tucked away; most moves don't need one.
 
 ### Stream Deck setup (Stream Deck → PTZ Flow → Ecamm + camera)
 
@@ -61,6 +63,7 @@ PTZ Flow has to be running. To check that it's listening, open `http://127.0.0.1
 | --- | --- |
 | `/scene/<name>` | switch Ecamm to `<name>` and run the move mapped to it |
 | `/move/<id>` | run a move without touching Ecamm |
+| `/preset/1` … `/preset/4` | go to a preset tile |
 | `/track/on`, `/track/off`, `/track/toggle` | AI tracking (it eases in and out) |
 | `/stop` | hold the camera where it is |
 | `/status` | JSON status |
