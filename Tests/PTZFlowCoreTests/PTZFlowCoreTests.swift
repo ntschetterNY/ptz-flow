@@ -254,7 +254,10 @@ final class TrackingTests: XCTestCase {
         }
         XCTAssertGreaterThan(speeds.last!, 0)
         XCTAssertLessThanOrEqual(speeds.first!, 8, "should ease in, not jump")
-        XCTAssertEqual(speeds, speeds.sorted())
+        // Ramps up, then holds steady (dithering alternates between neighbouring steps for a fractional speed).
+        XCTAssertEqual(Array(speeds.prefix(8)), Array(speeds.prefix(8)).sorted())
+        let steady = speeds.suffix(10)
+        XCTAssertLessThanOrEqual(steady.max()! - steady.min()!, 1)
     }
 
     func testLostSubjectEasesToStop() {
