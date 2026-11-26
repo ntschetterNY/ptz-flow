@@ -1,4 +1,5 @@
 import XCTest
+import CoreGraphics
 @testable import PTZFlowCore
 
 final class EasingTests: XCTestCase {
@@ -121,5 +122,210 @@ final class ControlServerTests: XCTestCase {
         XCTAssertEqual(ControlServer.route(fromRequest: "GET /stop HTTP/1.1\r\n\r\n"), ["stop"])
         XCTAssertNil(ControlServer.route(fromRequest: "DELETE /stop HTTP/1.1\r\n\r\n"))
         XCTAssertNil(ControlServer.route(fromRequest: ""))
+    }
+}
+
+final class SilkTests: XCTestCase {
+    func testSilkStartsAndEndsWithNoKick() {
+        // Velocity and acceleration are ~0 at both ends.
+        XCTAssertLessThan(abs(Easing.silk.slope(0)), 1e-3)
+        XCTAssertLessThan(abs(Easing.silk.slope(1)), 1e-3)
+        let h = 0.01
+        let accelStart = (Easing.silk.slope(h) - Easing.silk.slope(0)) / h
+        XCTAssertLessThan(abs(accelStart), 0.05)
+    }
+
+    func testSlewLimiterCapsChange() {
+        var s = SlewLimiter(maxRatePerSecond: 100)
+        XCTAssertEqual(s.step(toward: 255, dt: 0.05), 5, accuracy: 1e-9)
+        XCTAssertEqual(s.step(toward: -255, dt: 0.05), 0, accuracy: 1e-9)
+    }
+
+    func testDithererAveragesFractionalSpeed() {
+        var d = StepDitherer(limit: 255)
+        let out = (0..<100).map { _ in d.next(1.3) }
+        XCTAssertEqual(Double(out.reduce(0, +)) / 100, 1.3, accuracy: 0.02)
+        XCTAssertTrue(out.allSatisfy { $0 == 1 || $0 == 2 })
+        XCTAssertEqual(d.next(0), 0)
+        XCTAssertEqual(d.next(-0.6), -1)
+    }
+
+    func testShaperNeverJumps() {
+        var shaper = AxisShaper(calibration: MotionCalibration())
+        var last = 0
+        for _ in 0..<40 {
+            let cmd = shaper.shape(MotionMath.Velocity(pan: 255, tilt: 0, zoom: 0), dt: 0.05)
+            XCTAssertLessThanOrEqual(abs(cmd.panStep - last), 23) // 420 steps/s * 0.05 s, +1 for rounding
+            last = cmd.panStep
+        }
+        XCTAssertEqual(last, 255)
+    }
+
+    func testCorrectionIgnoresTinyErrorsAndIsCapped() {
+        let c = MotionCalibration()
+        let tiny = MotionMath.velocity(target: Pose(pan: 3, tilt: 0, zoom: 0), panVelocity: 0, tiltVelocity: 0,
+                                       zoomVelocity: 0, measured: .home, calibration: c)
+        XCTAssertEqual(tiny.pan, 0)
+        let huge = MotionMath.velocity(target: Pose(pan: 30000, tilt: 0, zoom: 0), panVelocity: 0, tiltVelocity: 0,
+                                       zoomVelocity: 0, measured: .home, calibration: c)
+        XCTAssertEqual(huge.pan, c.maxPanTiltCorrection / c.panUnitsPerSecondPerStep, accuracy: 1e-9)
+    }
+
+    func testMoveReachesEndPointOnSimulatedCamera() async {
+        let cam = SimulatedCamera()
+        var c = MotionCalibration()
+        c.tickRate = 50
+        c.latency = 0
+        let engine = MoveEngine(camera: cam, calibration: c)
+        let move = Move(id: "t", name: "t", end: Pose(pan: 400, tilt: -150, zoom: 0), duration: 3, easing: .silk)
+        await engine.perform(move)
+        let end = cam.pose
+        XCTAssertEqual(Double(end.pan), 400, accuracy: 25)
+        XCTAssertEqual(Double(end.tilt), -150, accuracy: 25)
+        // No speed change bigger than the acceleration limit allows.
+        let maxJump = zip(cam.panSpeeds, cam.panSpeeds.dropFirst()).map { abs($0 - $1) }.max() ?? 0
+        XCTAssertLessThanOrEqual(maxJump, Int(c.panTiltAcceleration / c.tickRate) + 2)
+    }
+}
+
+/// A camera that integrates speed commands using the default calibration.
+final class SimulatedCamera: PTZCamera, @unchecked Sendable {
+    private let lock = NSLock()
+    private var p = (pan: 0.0, tilt: 0.0, zoom: 0.0)
+    private var v = (pan: 0, tilt: 0, zoom: 0)
+    private var lastUpdate = Date()
+    private(set) var panSpeeds: [Int] = []
+    let c = MotionCalibration()
+
+    var pose: Pose {
+        lock.lock(); defer { lock.unlock() }
+        integrate()
+        return Pose(pan: Int(p.pan.rounded()), tilt: Int(p.tilt.rounded()), zoom: Int(p.zoom.rounded()))
+    }
+
+    private func integrate() {
+        let now = Date()
+        let dt = now.timeIntervalSince(lastUpdate)
+        lastUpdate = now
+        p.pan += Double(v.pan) * c.panUnitsPerSecondPerStep * dt
+        p.tilt += Double(v.tilt) * c.tiltUnitsPerSecondPerStep * dt
+        p.zoom += Double(v.zoom) * c.zoomUnitsPerSecondPerStep * dt
+    }
+
+    func readPose() async -> Pose? { pose }
+
+    func drive(panSpeed: Int, tiltSpeed: Int, zoomSpeed: Int) {
+        lock.lock(); defer { lock.unlock() }
+        integrate()
+        v = (panSpeed, tiltSpeed, zoomSpeed)
+        panSpeeds.append(panSpeed)
+    }
+
+    func stopAll() {
+        lock.lock(); defer { lock.unlock() }
+        integrate()
+        v = (0, 0, 0)
+    }
+
+    func setAutoFocus(_ on: Bool) {}
+    func onePushFocus() {}
+}
+
+final class TrackingTests: XCTestCase {
+    private func person(x: Double, y: Double = 0.45) -> [Detection] {
+        [Detection(box: CGRect(x: x - 0.1, y: y - 0.15, width: 0.2, height: 0.3), confidence: 0.9)]
+    }
+
+    func testCenteredSubjectDoesNotMoveCamera() {
+        var t = TrackingController()
+        t.observe(person(x: 0.52), at: 0)
+        let cmd = t.command(at: 0, dt: 0.05, zoom: 0)
+        XCTAssertEqual(cmd.panStep, 0)
+        XCTAssertEqual(cmd.tiltStep, 0)
+    }
+
+    func testSubjectToTheRightPansRightAndRampsUp() {
+        var t = TrackingController()
+        var speeds: [Int] = []
+        for i in 0..<20 {
+            let time = Double(i) * 0.05
+            t.observe(person(x: 0.8), at: time)
+            speeds.append(t.command(at: time, dt: 0.05, zoom: 0).panStep)
+        }
+        XCTAssertGreaterThan(speeds.last!, 0)
+        XCTAssertLessThanOrEqual(speeds.first!, 8, "should ease in, not jump")
+        XCTAssertEqual(speeds, speeds.sorted())
+    }
+
+    func testLostSubjectEasesToStop() {
+        var t = TrackingController()
+        for i in 0..<30 {
+            t.observe(person(x: 0.9), at: Double(i) * 0.05)
+            _ = t.command(at: Double(i) * 0.05, dt: 0.05, zoom: 0)
+        }
+        var last = Int.max
+        var time = 1.5
+        for _ in 0..<60 {
+            time += 0.05
+            let s = t.command(at: time + 5, dt: 0.05, zoom: 0).panStep
+            XCTAssertLessThanOrEqual(s, last)
+            last = s
+        }
+        XCTAssertEqual(last, 0)
+        XCTAssertTrue(t.isAtRest)
+    }
+
+    func testZoomedInMovesSlower() {
+        XCTAssertEqual(TrackingController.zoomScale(0), 1, accuracy: 1e-9)
+        XCTAssertEqual(TrackingController.zoomScale(0x4000), 0.2, accuracy: 1e-9)
+    }
+
+    func testSelectorSticksWithSamePerson() {
+        var s = SubjectSelector()
+        let pastor = Detection(box: CGRect(x: 0.4, y: 0.3, width: 0.15, height: 0.3), confidence: 0.9)
+        _ = s.update([pastor], at: 0)
+        // A bigger person walks in on the far left; keep following the pastor, who moved slightly.
+        let moved = Detection(box: CGRect(x: 0.43, y: 0.3, width: 0.15, height: 0.3), confidence: 0.9)
+        let other = Detection(box: CGRect(x: 0.0, y: 0.1, width: 0.3, height: 0.6), confidence: 0.95)
+        let chosen = s.update([other, moved], at: 0.1)
+        XCTAssertEqual(chosen, moved.box)
+    }
+
+    func testOneEuroSmoothsJitter() {
+        var f = OneEuroFilter(minCutoff: 0.3, beta: 0.5)
+        var outputs: [Double] = []
+        for i in 0..<100 {
+            outputs.append(f.filter(0.5 + (i % 2 == 0 ? 0.02 : -0.02), dt: 1.0 / 12))
+        }
+        let spread = outputs.suffix(20).max()! - outputs.suffix(20).min()!
+        XCTAssertLessThan(spread, 0.02)
+    }
+}
+
+final class NDITests: XCTestCase {
+    func testFourCC() {
+        XCTAssertEqual(NDILayout.fourCCBGRA, 0x4152_4742)
+    }
+
+    func testMissingLibraryIsNil() {
+        XCTAssertNil(NDILibrary.load(paths: ["/nonexistent/libndi.dylib"]))
+    }
+
+    func testPicksBirdDogByIP() {
+        let sources = [
+            NDISource(name: "PROCLAIM-PC (Proclaim)", address: "192.168.1.20:5961"),
+            NDISource(name: "BIRDDOG-1A2B3 (CAM)", address: "192.168.1.50:5961"),
+        ]
+        XCTAssertEqual(NDISource.bestMatch(in: sources, cameraHost: "192.168.1.50")?.name, "BIRDDOG-1A2B3 (CAM)")
+        XCTAssertEqual(NDISource.bestMatch(in: sources, cameraHost: "")?.name, "BIRDDOG-1A2B3 (CAM)")
+    }
+}
+
+final class MoveDecodingTests: XCTestCase {
+    func testOldSavedMovesStillLoad() throws {
+        let json = #"[{"id":"a","name":"A","end":{"pan":1,"tilt":2,"zoom":3},"duration":4,"easing":"gentle"}]"#
+        let moves = try JSONDecoder().decode([Move].self, from: Data(json.utf8))
+        XCTAssertEqual(moves.first?.trackAfterArriving, false)
+        XCTAssertEqual(moves.first?.easing, .gentle)
     }
 }
