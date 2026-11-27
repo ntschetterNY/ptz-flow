@@ -303,7 +303,6 @@ final class CoordinationTests: XCTestCase {
                 let q = cam.pose
                 let fp = Double(q.pan) / 800, fz = Double(q.zoom) / 6000
                 if fp > 0.1, fp < 0.9 { worst = max(worst, abs(fp - fz)) }
-                print(String(format: "TRACE pan %.2f zoom %.2f", fp, fz))
                 try? await Task.sleep(nanoseconds: 20_000_000)
             }
             return worst
