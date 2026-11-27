@@ -363,7 +363,12 @@ public final class MoveEngine: @unchecked Sendable {
             let elapsed = Date().timeIntervalSince(started)
             let p = duration > 0 ? min(elapsed / duration, 1) : 1
             progress(p * 0.97) // the landing finishes the bar
-            if p >= 1 { break }
+            if p >= 1 {
+                // The plan is finished; keep going briefly while a held or slow axis catches up, so the
+                // axes still arrive together rather than leaving the remainder to the landing.
+                let behind = latest.value.map { !MotionMath.isClose($0.pose, to, calibration: c) } ?? false
+                if !behind || elapsed > duration + 1.5 { break }
+            }
             // Keep pan, tilt and zoom at the same percentage of their journeys, judged by the latest reading.
             let along = latest.value.map { MotionMath.axisProgress(from: from, to: to, measured: $0.pose) }
             let now = MotionMath.coordinated(from: from, to: to, duration: duration, easing: easing, progress: p,
