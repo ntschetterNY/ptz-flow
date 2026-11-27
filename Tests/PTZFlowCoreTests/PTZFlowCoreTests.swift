@@ -150,6 +150,12 @@ final class SilkTests: XCTestCase {
         XCTAssertEqual(d.next(-0.6), -1)
     }
 
+    func testDithererHoldsSteadyAtCruiseSpeed() {
+        var d = StepDitherer(limit: 255)
+        let out = (0..<50).map { i in d.next(40.4 + 0.3 * sin(Double(i))) }
+        XCTAssertEqual(Set(out).count, 1, "cruise speed should not flicker between steps: \(out)")
+    }
+
     func testShaperNeverJumps() {
         var shaper = AxisShaper(calibration: MotionCalibration())
         var last = 0

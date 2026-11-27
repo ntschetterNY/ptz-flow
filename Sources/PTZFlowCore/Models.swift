@@ -71,12 +71,12 @@ public struct Move: Codable, Identifiable, Equatable, Sendable {
 
     /// Placeholder moves. Their poses are zero until captured from the real camera.
     public static let defaults: [Move] = [
-        Move(id: "wide", name: "Full stage wide", ecammScene: "Walk-in", end: .home, duration: 4, easing: .easeInOut),
+        Move(id: "wide", name: "Full stage wide", ecammScene: "Walk-in", end: .home, duration: 4, easing: .silk),
         Move(id: "worship", name: "Worship leader", ecammScene: "Worship", end: .home, duration: 3.5, easing: .silk),
         Move(id: "pulpit", name: "Pulpit close", ecammScene: "Sermon", end: .home, duration: 3.5, easing: .silk,
              trackAfterArriving: true),
         Move(id: "prayer", name: "Prayer slow push-in", ecammScene: "Prayer", end: .home, duration: 18, easing: .drift),
-        Move(id: "baptism", name: "Baptism tank", ecammScene: "Baptism", end: .home, duration: 4.5, easing: .easeInOut),
+        Move(id: "baptism", name: "Baptism tank", ecammScene: "Baptism", end: .home, duration: 4.5, easing: .silk),
     ]
 }
 

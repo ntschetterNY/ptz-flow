@@ -11,9 +11,9 @@ public struct MotionCalibration: Codable, Equatable, Sendable {
     /// Zoom position units per second, per extended zoom speed step (0...15).
     public var zoomUnitsPerSecondPerStep: Double = 250
     /// How hard the loop corrects drift between where the camera is and where it should be (per second).
-    public var correctionGain: Double = 1.6
+    public var correctionGain: Double = 1.0
     /// Errors smaller than this are left alone, so the loop never "hunts" around the curve.
-    public var panTiltDeadband: Double = 4
+    public var panTiltDeadband: Double = 6
     public var zoomDeadband: Double = 40
     /// Corrections are capped so they nudge the move instead of fighting it (units per second).
     public var maxPanTiltCorrection: Double = 240
@@ -95,8 +95,8 @@ public enum MotionMath {
     }
 
     /// Close enough to call it "on the end point" (a couple of VISCA units).
-    public static func isOnTarget(_ a: Pose, _ b: Pose) -> Bool {
-        abs(a.pan - b.pan) <= 2 && abs(a.tilt - b.tilt) <= 2 && abs(a.zoom - b.zoom) <= 16
+    public static func isOnTarget(_ a: Pose, _ b: Pose, tolerance: Int = 2) -> Bool {
+        abs(a.pan - b.pan) <= tolerance && abs(a.tilt - b.tilt) <= tolerance && abs(a.zoom - b.zoom) <= tolerance * 8
     }
 
     public static func isClose(_ a: Pose, _ b: Pose, calibration c: MotionCalibration) -> Bool {
@@ -115,18 +115,29 @@ public struct StepDitherer: Sendable {
 
     public init(limit: Int) { self.limit = limit }
 
+    private var lastOut = 0
+
     public mutating func next(_ v: Double) -> Int {
-        guard v.isFinite else { residual = 0; return 0 }
-        if abs(v) < 0.05 { residual = 0; return 0 }
+        guard v.isFinite else { residual = 0; lastOut = 0; return 0 }
+        if abs(v) < 0.05 { residual = 0; lastOut = 0; return 0 }
+        // At normal speeds, hold the current step until the wanted speed has really moved on: flipping
+        // between neighbouring steps every tick makes some heads stutter.
+        if abs(v) >= 6 {
+            residual = 0
+            if abs(v - Double(lastOut)) < 0.75 { return lastOut }
+            lastOut = min(max(Int(v.rounded()), -limit), limit)
+            return lastOut
+        }
         let wanted = v + residual
         let out = min(max(Int(wanted.rounded()), -limit), limit)
         residual = min(max(wanted - Double(out), -1), 1)
         // Never reverse direction because of the carried fraction.
-        if (out > 0 && v < 0) || (out < 0 && v > 0) { residual = 0; return 0 }
+        if (out > 0 && v < 0) || (out < 0 && v > 0) { residual = 0; lastOut = 0; return 0 }
+        lastOut = out
         return out
     }
 
-    public mutating func reset() { residual = 0 }
+    public mutating func reset() { residual = 0; lastOut = 0 }
 }
 
 /// Smooths speed commands on all three axes: acceleration limit, then dithered rounding.
@@ -292,17 +303,41 @@ public final class MoveEngine: @unchecked Sendable {
         let started = Date()
         var tick = 0
 
+        // Position reads run on their own, so speed commands go out on a perfectly steady beat even when a
+        // reply is slow (the old loop waited for each reply, which made moves hop over a VPN).
+        let latest = Locked<(pose: Pose, at: Date)?>(nil)
+        let reader = Task { [camera] in
+            while !Task.isCancelled {
+                let asked = Date()
+                if let p = await camera.readPose() {
+                    // The reading describes the camera about half a round trip after we asked.
+                    let rtt = Date().timeIntervalSince(asked)
+                    latest.value = (p, asked.addingTimeInterval(rtt / 2))
+                }
+                try? await Task.sleep(nanoseconds: 40_000_000)
+            }
+        }
+        defer { reader.cancel() }
+        var lastUsed: Date?
+
         while !Task.isCancelled {
             let elapsed = Date().timeIntervalSince(started)
             let p = duration > 0 ? min(elapsed / duration, 1) : 1
             progress(p * 0.97) // the landing finishes the bar
             if p >= 1 { break }
             let now = MotionMath.target(from: from, to: to, duration: duration, easing: easing, progress: p)
-            let lagged = MotionMath.target(from: from, to: to, duration: duration, easing: easing,
-                                           progress: duration > 0 ? max((elapsed - c.latency) / duration, 0) : 1)
-            let measured = await camera.readPose()
-            if let measured { learner.observe(measured) }
-            let v = MotionMath.velocity(target: lagged.pose, panVelocity: now.panVelocity, tiltVelocity: now.tiltVelocity,
+            var measured: Pose?
+            var reference = now.pose
+            if let reading = latest.value, reading.at != lastUsed {
+                // Use each reading once, against where the camera should have been when it was taken.
+                lastUsed = reading.at
+                measured = reading.pose
+                learner.observe(reading.pose)
+                let then = reading.at.timeIntervalSince(started) - (c.latency - camera.latencyEstimate / 2)
+                reference = MotionMath.target(from: from, to: to, duration: duration, easing: easing,
+                                              progress: duration > 0 ? min(max(then / duration, 0), 1) : 1).pose
+            }
+            let v = MotionMath.velocity(target: reference, panVelocity: now.panVelocity, tiltVelocity: now.tiltVelocity,
                                         zoomVelocity: now.zoomVelocity, measured: measured, calibration: c)
             let cmd = shaper.shape(v, dt: interval)
             camera.drive(panSpeed: cmd.panStep, tiltSpeed: cmd.tiltStep, zoomSpeed: cmd.zoomStep)
@@ -310,6 +345,7 @@ public final class MoveEngine: @unchecked Sendable {
             tick += 1
             await Self.sleep(until: started.addingTimeInterval(Double(tick) * interval))
         }
+        reader.cancel()
         // Ease the speed down rather than cutting it, then hand over to the landing.
         while !Task.isCancelled, !shaper.isAtRest {
             let cmd = shaper.shape(MotionMath.Velocity(pan: 0, tilt: 0, zoom: 0), dt: interval)
@@ -337,7 +373,7 @@ public final class MoveEngine: @unchecked Sendable {
             camera.moveAbsolute(to: target, speed: c.landingSpeed)
             return .sentWithoutFeedback
         }
-        if MotionMath.isOnTarget(last, target) { camera.stopAll(); return .arrived }
+        if MotionMath.isOnTarget(last, target, tolerance: 4) { camera.stopAll(); return .arrived } // close enough: no visible nudge
         camera.moveAbsolute(to: target, speed: c.landingSpeed)
         var still = 0
         let deadline = Date().addingTimeInterval(c.landingTimeout)
