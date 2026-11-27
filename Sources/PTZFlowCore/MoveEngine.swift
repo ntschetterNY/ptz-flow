@@ -63,6 +63,42 @@ public enum MotionMath {
     }
 
     /// Feed-forward velocity plus a gentle, capped correction toward the target, in (fractional) speed steps.
+    /// How far along its own journey each axis is (0 = start, 1 = end), or nil for an axis that barely moves.
+    public static func axisProgress(from: Pose, to: Pose, measured m: Pose) -> [Double?] {
+        func f(_ a: Int, _ b: Int, _ x: Int, _ minimum: Int) -> Double? {
+            abs(b - a) < minimum ? nil : Double(x - a) / Double(b - a)
+        }
+        return [f(from.pan, to.pan, m.pan, 24), f(from.tilt, to.tilt, m.tilt, 24), f(from.zoom, to.zoom, m.zoom, 240)]
+    }
+
+    /// The planned point for this moment, with pan, tilt and zoom kept at the same percentage of their journeys.
+    /// An axis that has got ahead of the slowest one by more than `lead` is held there until the slowest catches
+    /// up, so the shot moves as one piece and every axis arrives together.
+    public static func coordinated(from: Pose, to: Pose, duration: Double, easing: Easing, progress p: Double,
+                                   measured: [Double?]?, lead: Double)
+        -> (pose: Pose, panVelocity: Double, tiltVelocity: Double, zoomVelocity: Double, held: Bool) {
+        let planned = easing.value(p)
+        let rate = duration > 0 ? easing.slope(p) / duration : 0
+        var fractions = [planned, planned, planned]
+        var rates = [rate, rate, rate]
+        var held = false
+        if let measured {
+            let known = measured.compactMap { $0 }
+            if let slowest = known.min() {
+                for i in 0..<3 {
+                    guard let mine = measured[i], mine > slowest + lead * 0.5 else { continue }
+                    let cap = min(slowest + lead, 1)
+                    if cap < planned { fractions[i] = cap; rates[i] = 0; held = true }
+                }
+            }
+        }
+        func axis(_ a: Int, _ b: Int, _ f: Double) -> Int { a + Int((Double(b - a) * f).rounded()) }
+        let pose = Pose(pan: axis(from.pan, to.pan, fractions[0]), tilt: axis(from.tilt, to.tilt, fractions[1]),
+                        zoom: axis(from.zoom, to.zoom, fractions[2]))
+        return (pose, Double(to.pan - from.pan) * rates[0], Double(to.tilt - from.tilt) * rates[1],
+                Double(to.zoom - from.zoom) * rates[2], held)
+    }
+
     public static func velocity(target: Pose, panVelocity: Double, tiltVelocity: Double, zoomVelocity: Double,
                                 measured: Pose?, calibration c: MotionCalibration) -> Velocity {
         var vp = panVelocity, vt = tiltVelocity, vz = zoomVelocity
@@ -319,13 +355,18 @@ public final class MoveEngine: @unchecked Sendable {
         }
         defer { reader.cancel() }
         var lastUsed: Date?
+        // How far (as a share of the whole move) one axis may run ahead of the slowest before it waits.
+        let lead = 0.04 + min(c.latency / max(duration, 0.5), 0.06)
 
         while !Task.isCancelled {
             let elapsed = Date().timeIntervalSince(started)
             let p = duration > 0 ? min(elapsed / duration, 1) : 1
             progress(p * 0.97) // the landing finishes the bar
             if p >= 1 { break }
-            let now = MotionMath.target(from: from, to: to, duration: duration, easing: easing, progress: p)
+            // Keep pan, tilt and zoom at the same percentage of their journeys, judged by the latest reading.
+            let along = latest.value.map { MotionMath.axisProgress(from: from, to: to, measured: $0.pose) }
+            let now = MotionMath.coordinated(from: from, to: to, duration: duration, easing: easing, progress: p,
+                                             measured: along, lead: lead)
             var measured: Pose?
             var reference = now.pose
             if let reading = latest.value, reading.at != lastUsed {
@@ -334,8 +375,9 @@ public final class MoveEngine: @unchecked Sendable {
                 measured = reading.pose
                 learner.observe(reading.pose)
                 let then = reading.at.timeIntervalSince(started) - (c.latency - camera.latencyEstimate / 2)
-                reference = MotionMath.target(from: from, to: to, duration: duration, easing: easing,
-                                              progress: duration > 0 ? min(max(then / duration, 0), 1) : 1).pose
+                reference = MotionMath.coordinated(from: from, to: to, duration: duration, easing: easing,
+                                                   progress: duration > 0 ? min(max(then / duration, 0), 1) : 1,
+                                                   measured: along, lead: lead).pose
             }
             let v = MotionMath.velocity(target: reference, panVelocity: now.panVelocity, tiltVelocity: now.tiltVelocity,
                                         zoomVelocity: now.zoomVelocity, measured: measured, calibration: c)
@@ -374,7 +416,9 @@ public final class MoveEngine: @unchecked Sendable {
             return .sentWithoutFeedback
         }
         if MotionMath.isOnTarget(last, target, tolerance: 4) { camera.stopAll(); return .arrived } // close enough: no visible nudge
-        camera.moveAbsolute(to: target, speed: c.landingSpeed)
+        // Tiny errors finish gently; a bigger miss finishes briskly instead of creeping for seconds.
+        let miss = max(abs(last.pan - target.pan), abs(last.tilt - target.tilt), abs(last.zoom - target.zoom) / 8)
+        camera.moveAbsolute(to: target, speed: min(c.landingSpeed + miss / 25, 16))
         var still = 0
         let deadline = Date().addingTimeInterval(c.landingTimeout)
         while !Task.isCancelled, Date() < deadline {

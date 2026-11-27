@@ -198,6 +198,8 @@ final class SimulatedCamera: PTZCamera, @unchecked Sendable {
     private let lock = NSLock()
     /// How much faster the real camera moves than the calibration assumes (1 = exactly as calibrated).
     var speedScale = 1.0
+    /// Extra factor for zoom alone, like a lens that runs faster than the calibration thinks.
+    var zoomScale = 1.0
     /// Every Nth position read is "lost", like a dropped UDP reply.
     var dropEvery = 0
     private var reads = 0
@@ -229,7 +231,7 @@ final class SimulatedCamera: PTZCamera, @unchecked Sendable {
         }
         p.pan += Double(v.pan) * c.panUnitsPerSecondPerStep * speedScale * dt
         p.tilt += Double(v.tilt) * c.tiltUnitsPerSecondPerStep * speedScale * dt
-        p.zoom += Double(v.zoom) * c.zoomUnitsPerSecondPerStep * speedScale * dt
+        p.zoom += Double(v.zoom) * c.zoomUnitsPerSecondPerStep * speedScale * zoomScale * dt
         p.tilt = max(p.tilt, tiltMin)
         p.zoom = max(p.zoom, zoomMin)
     }
@@ -272,6 +274,45 @@ final class SimulatedCamera: PTZCamera, @unchecked Sendable {
     /// Mechanical limits, like the real camera's end stops.
     var tiltMin = -1_000_000.0
     var zoomMin = 0.0
+}
+
+final class CoordinationTests: XCTestCase {
+    func testAxisAheadIsHeldForTheSlowest() {
+        let from = Pose(pan: 0, tilt: 0, zoom: 0), to = Pose(pan: 1000, tilt: 0, zoom: 8000)
+        // Zoom is 60% of the way, pan only 20%: zoom must wait near 20%, pan keeps its plan.
+        let r = MotionMath.coordinated(from: from, to: to, duration: 4, easing: .linear, progress: 0.5,
+                                       measured: [0.2, nil, 0.6], lead: 0.05)
+        XCTAssertTrue(r.held)
+        XCTAssertEqual(r.pose.pan, 500)
+        XCTAssertEqual(r.pose.zoom, 2000)
+        XCTAssertEqual(r.zoomVelocity, 0)
+        XCTAssertGreaterThan(r.panVelocity, 0)
+    }
+
+    /// Zoom runs twice as fast as calibrated: pan and zoom should still stay at about the same percentage.
+    func testPanAndZoomMoveTogether() async {
+        let cam = SimulatedCamera()
+        cam.zoomScale = 2
+        var c = MotionCalibration()
+        c.tickRate = 50
+        let engine = MoveEngine(camera: cam, calibration: c)
+        let to = Pose(pan: 800, tilt: 0, zoom: 6000)
+        let sampler = Task { () -> Double in
+            var worst = 0.0
+            while !Task.isCancelled {
+                let q = cam.pose
+                let fp = Double(q.pan) / 800, fz = Double(q.zoom) / 6000
+                if fp > 0.1, fp < 0.9 { worst = max(worst, abs(fp - fz)) }
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+            return worst
+        }
+        let outcome = await engine.perform(Move(id: "c", name: "c", end: to, duration: 2, easing: .linear))
+        sampler.cancel()
+        let worst = await sampler.value
+        XCTAssertEqual(outcome, .arrived)
+        XCTAssertLessThan(worst, 0.2, "pan and zoom drifted apart by \(worst)")
+    }
 }
 
 final class LandingTests: XCTestCase {
