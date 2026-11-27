@@ -16,7 +16,7 @@ final class VideoPipeline: ObservableObject {
             switch self {
             case .notInstalled: return "NDI not installed. Install the free NDI SDK for Apple from ndi.video, then press Find."
             case .searching: return "Looking for NDI sources…"
-            case .noSources: return "No NDI sources found on this network."
+            case .noSources: return "No NDI sources found. Over a VPN, NDI can't discover sources on its own: make sure the camera's IP is entered, and add any other NDI machines under Extra NDI addresses."
             case let .receiving(name): return "Preview: \(name)"
             case let .failed(why): return why
             }
@@ -35,6 +35,11 @@ final class VideoPipeline: ObservableObject {
         }
     }
     private var currentSource: NDISource?
+    /// Other machines to ask directly for NDI sources (e.g. the Proclaim PC), comma separated.
+    /// The camera's own IP is always asked, so a VPN connection works without this.
+    @Published var extraIPs: String = UserDefaults.standard.string(forKey: "ndiExtraIPs") ?? "" {
+        didSet { UserDefaults.standard.set(extraIPs, forKey: "ndiExtraIPs") }
+    }
 
     /// Called with each analysed frame's detections (main actor).
     var onDetections: (([Detection]) -> Void)?
@@ -57,8 +62,9 @@ final class VideoPipeline: ObservableObject {
             return
         }
         status = .searching
+        let ips = [cameraHost, extraIPs]
         Task.detached(priority: .userInitiated) {
-            let found = library.findSources(timeout: 5)
+            let found = library.findSources(timeout: 6, extraIPs: ips)
             await MainActor.run {
                 self.sources = found
                 let saved = found.first { $0.name == self.selectedSourceName }

@@ -56,6 +56,19 @@ public struct NDISource: Hashable, Identifiable, Sendable {
     }
 }
 
+extension NDILibrary {
+    /// "192.168.1.50, 10.0.0.9" → "192.168.1.50,10.0.0.9", dropping blanks, ports and duplicates.
+    public static func extraIPsString(_ ips: [String]) -> String {
+        var seen = Set<String>()
+        return ips
+            .flatMap { $0.split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\n" }) }
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .map { $0.split(separator: ":").first.map(String.init) ?? $0 }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .joined(separator: ",")
+    }
+}
+
 public final class NDILibrary: @unchecked Sendable {
     typealias InitializeFn = @convention(c) () -> Bool
     typealias FindCreateFn = @convention(c) (UnsafeRawPointer?) -> OpaquePointer?
@@ -142,12 +155,21 @@ public final class NDILibrary: @unchecked Sendable {
         self.recvFreeVideo = recvFreeVideo
     }
 
-    /// Looks for NDI sources on the network for up to `timeout` seconds. Call off the main thread.
-    public func findSources(timeout: TimeInterval = 3) -> [NDISource] {
+    /// Looks for NDI sources for up to `timeout` seconds. Call off the main thread.
+    ///
+    /// NDI normally finds sources with mDNS (Bonjour), which does not cross a VPN or a routed subnet.
+    /// `extraIPs` are asked directly instead, so a camera reached over a VPN still shows up.
+    public func findSources(timeout: TimeInterval = 3, extraIPs: [String] = []) -> [NDISource] {
         let settings = UnsafeMutableRawPointer.allocate(byteCount: NDILayout.findCreateSize, alignment: 8)
-        defer { settings.deallocate() }
+        let ips = Self.extraIPsString(extraIPs)
+        let ipsC: UnsafeMutablePointer<CChar>? = ips.isEmpty ? nil : strdup(ips)
+        defer {
+            settings.deallocate()
+            free(ipsC)
+        }
         settings.initializeMemory(as: UInt8.self, repeating: 0, count: NDILayout.findCreateSize)
         settings.storeBytes(of: true, toByteOffset: NDILayout.findShowLocal, as: Bool.self)
+        settings.storeBytes(of: ipsC.map { UnsafePointer($0) }, toByteOffset: NDILayout.findExtraIPs, as: UnsafePointer<CChar>?.self)
         guard let finder = findCreate(settings) else { return [] }
         defer { findDestroy(finder) }
 

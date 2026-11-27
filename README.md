@@ -39,6 +39,8 @@ Then enter the camera's IP address in the app and press **Connect**. VISCA over 
 
 For the preview and AI tracking, install the free **NDI SDK for Apple** (ndi.video → For Developers → NDI SDK, pick *Apple*). PTZ Flow finds `libndi.dylib` in `/Library/NDI SDK for Apple/lib/macOS/` on its own; without it the app still runs, just without video. NDI® is a registered trademark of Vizrt NDI AB.
 
+**Over a VPN:** NDI normally finds sources with Bonjour, which doesn't cross a VPN. PTZ Flow asks the camera's IP directly, and you can add other NDI machines under *Extra NDI addresses*. Use *Standard* preview quality on a slow link.
+
 ### Presets and moves
 
 The left side is split: four **preset tiles** on top (each shows a picture of where it ends), and the selected move's settings below.

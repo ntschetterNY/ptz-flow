@@ -6,6 +6,9 @@ public final class VISCAClient: @unchecked Sendable {
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "ptzflow.visca")
     private var sequence: UInt32 = 0
+    private var rtt: Double = 0.03
+    /// Smoothed time for an inquiry to come back (seconds). Over a VPN this is often 50-200 ms.
+    public var roundTripTime: Double { queue.sync { rtt } }
     /// The pending inquiry: the reply length it expects, and who to hand it to.
     private var waiter: (length: Int, deliver: ([UInt8]) -> Void)?
 
@@ -38,19 +41,23 @@ public final class VISCAClient: @unchecked Sendable {
     /// Sends an inquiry and waits for its `90 50 ...` reply, or nil after `timeout` seconds.
     /// `replyLength` filters out a late reply to an earlier inquiry (e.g. a zoom reply arriving while we wait
     /// for pan/tilt), which used to make a position read fail and a move give up.
-    public func inquire(_ payload: [UInt8], replyLength: Int? = nil, timeout: TimeInterval = 0.25) async -> [UInt8]? {
+    public func inquire(_ payload: [UInt8], replyLength: Int? = nil, timeout: TimeInterval? = nil) async -> [UInt8]? {
         await withCheckedContinuation { (continuation: CheckedContinuation<[UInt8]?, Never>) in
             queue.async {
                 let once = Once()
+                let sent = Date()
+                // Wait long enough for a slow (VPN) link, based on how long replies have been taking.
+                let wait = timeout ?? min(max(0.25, self.rtt * 3 + 0.05), 1.5)
                 let finish: ([UInt8]?) -> Void = { reply in
                     guard !once.done else { return }
                     once.done = true
+                    if reply != nil { self.rtt = self.rtt * 0.8 + Date().timeIntervalSince(sent) * 0.2 }
                     continuation.resume(returning: reply)
                 }
                 self.waiter = (replyLength ?? 0, { finish($0) })
                 self.sequence &+= 1
                 self.sendRaw(VISCA.packet(.inquiry, payload: payload, sequence: self.sequence))
-                self.queue.asyncAfter(deadline: .now() + timeout) {
+                self.queue.asyncAfter(deadline: .now() + wait) {
                     if !once.done {
                         self.waiter = nil
                         finish(nil)

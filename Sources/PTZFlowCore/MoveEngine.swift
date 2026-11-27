@@ -218,26 +218,53 @@ public final class MoveEngine: @unchecked Sendable {
     /// Parks the camera for the week: tilts all the way down (lens facing the floor, away from dust) and zooms
     /// all the way out. Drives until the camera stops moving on its limits, then stops. Returns where it ended.
     @discardableResult
-    public func park(tiltSpeed: Int = 60, timeout: TimeInterval = 25) async -> Pose? {
+    /// Always full speed: it ignores every speed and smoothing setting.
+    public func park(timeout: TimeInterval = 20) async -> Pose? {
         let started = Date()
-        var last = await readPose()
+        var last = await camera.readPose()
         var still = 0
+        var lastReading = Date()
+        camera.drive(panSpeed: 0, tiltSpeed: -255, zoomSpeed: -15)
         while !Task.isCancelled, Date().timeIntervalSince(started) < timeout {
-            // Ease up to speed over the first half second.
-            let ramp = min(Date().timeIntervalSince(started) / 0.5, 1)
-            camera.drive(panSpeed: 0, tiltSpeed: -max(1, Int(Double(tiltSpeed) * ramp)), zoomSpeed: -7)
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            guard let p = await camera.readPose() else { continue }
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            camera.drive(panSpeed: 0, tiltSpeed: -255, zoomSpeed: -15) // repeated in case a UDP packet was lost
+            guard let p = await camera.readPose() else {
+                // No position replies: a full-speed tilt and zoom finish well within 6 s, so stop then.
+                if Date().timeIntervalSince(lastReading) > 6 { break }
+                continue
+            }
+            lastReading = Date()
             if let l = last, abs(p.tilt - l.tilt) <= 1, abs(p.zoom - l.zoom) <= 4 {
                 still += 1
             } else {
                 still = 0
             }
             last = p
-            if still >= 5 { break } // both axes have been at their limits for ~0.75 s
+            if still >= 4 { break } // both axes have sat at their limits for about half a second
         }
         camera.stopAll()
         return await readPose() ?? last
+    }
+
+    /// Straight to `pose` at the camera's top speed, no easing (used by Turn On). Waits until it's there.
+    @discardableResult
+    public func rush(to pose: Pose, timeout: TimeInterval = 15) async -> Outcome {
+        camera.moveAbsolute(to: pose, speed: 24)
+        let started = Date()
+        var last: Pose?
+        var still = 0
+        while !Task.isCancelled, Date().timeIntervalSince(started) < timeout {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard let p = await camera.readPose() else { continue }
+            if MotionMath.isOnTarget(p, pose) { return .arrived }
+            still = (p == last) ? still + 1 : 0
+            last = p
+            if still >= 6 {
+                camera.moveAbsolute(to: pose, speed: 24)
+                still = 0
+            }
+        }
+        return Task.isCancelled ? .cancelled : .stoppedShort(last ?? pose)
     }
 
     /// Off-air repositioning time: quick, but still eased. 1 to 3 seconds depending on distance.
@@ -256,7 +283,9 @@ public final class MoveEngine: @unchecked Sendable {
     }
 
     func glide(from: Pose, to: Pose, duration: Double, easing: Easing, progress: @Sendable (Double) -> Void) async {
-        let c = calibration
+        var c = calibration
+        // Over a VPN the position we read is older; compare it with where the camera should have been then.
+        c.latency = max(c.latency, camera.latencyEstimate * 0.75 + 0.03)
         let interval = 1.0 / max(c.tickRate, 1)
         var shaper = AxisShaper(calibration: c)
         var learner = CalibrationLearner(start: from)
@@ -291,8 +320,8 @@ public final class MoveEngine: @unchecked Sendable {
         camera.stopAll()
         if !Task.isCancelled, let end = await camera.readPose() {
             learner.observe(end)
-            let learned = learner.updated(c)
-            if learned != c {
+            let learned = learner.updated(calibration)
+            if learned != calibration {
                 calibration = learned
                 onCalibrationLearned?(learned)
             }

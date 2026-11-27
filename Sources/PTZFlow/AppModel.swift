@@ -162,6 +162,20 @@ final class AppModel: ObservableObject {
         addLog("Held position")
     }
 
+    /// Top speed of the joystick and arrow keys, 0.1 ... 1. Lower gives finer control.
+    @Published var jogSpeed: Double = UserDefaults.standard.object(forKey: "jogSpeed") as? Double ?? 0.5 {
+        didSet { UserDefaults.standard.set(jogSpeed, forKey: "jogSpeed") }
+    }
+
+    /// Arrow-key nudge: a slow, steady creep while the key is held (dx, dy in -1...1).
+    func nudge(dx: Double, dy: Double, zoom: Double = 0) {
+        guard let camera else { return }
+        if runningMoveID != nil || trackingEnabled { stop() }
+        let fine = max(jogSpeed * 0.25, 0.04)
+        camera.drive(panSpeed: Int((dx * 255 * fine).rounded()), tiltSpeed: Int((dy * 255 * fine).rounded()),
+                     zoomSpeed: Int((zoom * 15 * max(fine * 2, 0.15)).rounded()))
+    }
+
     /// Joystick input, -1...1 on each axis, with a response curve so small pushes creep.
     func jog(x: Double, y: Double, zoom: Double = 0) {
         guard let camera else { return }
@@ -170,7 +184,12 @@ final class AppModel: ObservableObject {
             let shaped = (v < 0 ? -1 : 1) * pow(abs(v), 2)
             return Int((shaped * limit).rounded())
         }
-        camera.drive(panSpeed: curve(x, 180), tiltSpeed: curve(-y, 140), zoomSpeed: curve(zoom, 10))
+        // Cubic response: the first half of the stick is very fine, the edge is full (jogSpeed-limited) speed.
+        func fineCurve(_ v: Double, _ limit: Double) -> Int {
+            let shaped = (v < 0 ? -1 : 1) * pow(abs(v), 3)
+            return Int((shaped * limit * jogSpeed).rounded())
+        }
+        camera.drive(panSpeed: fineCurve(x, 255), tiltSpeed: fineCurve(-y, 200), zoomSpeed: curve(zoom, 10))
     }
 
     func releaseJog() {
@@ -345,8 +364,11 @@ final class AppModel: ObservableObject {
             }
             self.addLog("Camera is on")
             self.powerStatus = nil
-            if let target {
-                self.run(moveID: target.id)
+            if let target, let engine = self.engine {
+                // Full speed, no easing: Turn On ignores the move's own time and curve.
+                self.addLog("Going to “\(target.name)” at full speed")
+                let outcome = await engine.rush(to: target.end)
+                self.addLog(outcome == .arrived ? "Ready: \(target.name)" : "Turn On: didn't quite reach “\(target.name)”")
             } else {
                 self.addLog("Turn On: no Turn On shot chosen, so the camera stays where it started")
             }

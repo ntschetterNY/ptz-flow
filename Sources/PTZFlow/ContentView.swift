@@ -266,6 +266,28 @@ struct ControlColumn: View {
     @State private var knob: CGSize = .zero
 
     var body: some View {
+        controls
+            .focusable()
+            .focusEffectDisabled()
+            .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow, "+", "=", "-"], phases: [.down, .repeat, .up]) { press in
+                if press.phase == .up {
+                    model.releaseJog()
+                    return .handled
+                }
+                switch press.key {
+                case .leftArrow: model.nudge(dx: -1, dy: 0)
+                case .rightArrow: model.nudge(dx: 1, dy: 0)
+                case .upArrow: model.nudge(dx: 0, dy: 1)
+                case .downArrow: model.nudge(dx: 0, dy: -1)
+                case "+", "=": model.nudge(dx: 0, dy: 0, zoom: 1)
+                case "-": model.nudge(dx: 0, dy: 0, zoom: -1)
+                default: return .ignored
+                }
+                return .handled
+            }
+    }
+
+    private var controls: some View {
         VStack(spacing: 16) {
             HStack {
                 TextField("Camera IP address (e.g. 192.168.1.50)", text: $model.cameraHost)
@@ -288,6 +310,13 @@ struct ControlColumn: View {
                         Button { model.jog(x: 0, y: 0, zoom: 0.6) } label: { Image(systemName: "plus.magnifyingglass") }
                     }
                     Button("Hold position") { model.stop() }
+                    Text("Joystick speed").font(.caption).foregroundStyle(.secondary).padding(.top, 6)
+                    HStack {
+                        Text("Fine").font(.caption2)
+                        Slider(value: $model.jogSpeed, in: 0.1...1).frame(width: 120)
+                        Text("Fast").font(.caption2)
+                    }
+                    Text("Arrow keys nudge, + / − zoom").font(.caption2).foregroundStyle(.tertiary)
                 }
             }
         }
@@ -431,6 +460,14 @@ struct PreviewPanel: View {
                 Text("NDI® is a registered trademark of Vizrt NDI AB.").font(.caption2).foregroundStyle(.tertiary)
             }
             .font(.caption)
+            HStack {
+                Text("Extra NDI addresses").font(.caption).foregroundStyle(.secondary)
+                TextField("e.g. Proclaim PC's IP (the camera's IP is always checked)", text: $video.extraIPs)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                    .onSubmit { video.findAndConnect(cameraHost: model.cameraHost) }
+            }
+            .help("Over a VPN, NDI can't find sources automatically. PTZ Flow asks these addresses directly.")
         }
     }
 

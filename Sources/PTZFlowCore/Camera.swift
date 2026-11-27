@@ -13,6 +13,12 @@ public protocol PTZCamera: AnyObject, Sendable {
     func setPower(_ on: Bool)
     /// true = on, false = standby, nil = no answer.
     func readPower() async -> Bool?
+    /// Round-trip time to the camera in seconds (0 if unknown). Larger over a VPN.
+    var latencyEstimate: Double { get }
+}
+
+public extension PTZCamera {
+    var latencyEstimate: Double { 0 }
 }
 
 /// A BirdDog PTZ camera controlled over VISCA-over-IP.
@@ -79,6 +85,8 @@ public final class BirdDogCamera: PTZCamera, @unchecked Sendable {
         lastPanTilt = (0, 0)
         lastPanTiltSent = Date()
     }
+
+    public var latencyEstimate: Double { client.roundTripTime }
 
     public func setPower(_ on: Bool) {
         client.command(VISCA.power(on: on))

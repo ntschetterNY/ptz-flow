@@ -317,7 +317,7 @@ final class PowerTests: XCTestCase {
         cam.moveAbsolute(to: Pose(pan: 120, tilt: 50, zoom: 1500), speed: 24)
         try? await Task.sleep(nanoseconds: 700_000_000)
         let engine = MoveEngine(camera: cam)
-        let end = await engine.park(tiltSpeed: 100, timeout: 10)
+        let end = await engine.park(timeout: 10)
         XCTAssertEqual(end?.tilt, -400)
         XCTAssertEqual(end?.zoom, 0)
         XCTAssertEqual(end?.pan, 120)
@@ -401,6 +401,11 @@ final class TrackingTests: XCTestCase {
 final class NDITests: XCTestCase {
     func testFourCC() {
         XCTAssertEqual(NDILayout.fourCCBGRA, 0x4152_4742)
+    }
+
+    func testExtraIPsString() {
+        XCTAssertEqual(NDILibrary.extraIPsString(["192.168.1.50", "10.0.0.9:5960, 192.168.1.50", " "]), "192.168.1.50,10.0.0.9")
+        XCTAssertEqual(NDILibrary.extraIPsString(["", ""]), "")
     }
 
     func testMissingLibraryIsNil() {
