@@ -14,12 +14,15 @@ Early starter. It compiles and its unit tests run on GitHub Actions (macOS). **I
 | Piece | State |
 | --- | --- |
 | VISCA-over-IP client (pan/tilt/zoom drive, position read-back, focus) | written, unit-tested packet bytes |
-| Eased move engine (start/end, 4 curves, closed loop) | written, needs on-camera calibration |
+| Eased move engine: A → B, 5 curves incl. "Silk", acceleration-limited, latency-aware correction, gentle settle | written, simulated in tests, needs on-camera calibration |
+| Move editor: set/go to A and B, duration slider, add/delete moves | written |
+| NDI preview (loads the NDI runtime at launch; low-bandwidth stream) | written, needs the NDI SDK for Apple installed |
+| AI tracking (Apple Vision on-device, 1€ filter, dead zone, zoom-aware, eased start/stop) | written, needs tuning on the real stage |
 | Stream Deck / script trigger (`http://127.0.0.1:7350/scene/<name>`) | written |
 | Ecamm scene switch (AppleScript) | written, AppleScript wording to verify |
 | Focus modes (manual / smooth auto / one-push) | written |
 | Update notice with a link to GitHub releases | written |
-| NDI preview, AI tracking, recording | not started |
+| Recording | not started |
 
 ## Run it on the Mac
 
@@ -33,6 +36,19 @@ cp -R "build/PTZ Flow.app" /Applications/
 ```
 
 Then enter the camera's IP address in the app and press **Connect**. VISCA over IP has to be enabled on the camera (UDP 52381).
+
+For the preview and AI tracking, install the free **NDI SDK for Apple** (ndi.video → For Developers → NDI SDK, pick *Apple*). PTZ Flow finds `libndi.dylib` in `/Library/NDI SDK for Apple/lib/macOS/` on its own; without it the app still runs, just without video. NDI® is a registered trademark of Vizrt NDI AB.
+
+**Over a VPN:** NDI normally finds sources with Bonjour, which doesn't cross a VPN. PTZ Flow asks the camera's IP directly, and you can add other NDI machines under *Extra NDI addresses*. Use *Standard* preview quality on a slow link.
+
+### Presets and moves
+
+The left side is split: four **preset tiles** on top (each shows a picture of where it ends), and the selected move's settings below.
+
+1. Jog the camera to the shot and press **Save end point**. That also grabs the tile's picture.
+2. Pick a time and a curve. **Silk** has no kick at either end.
+3. Click the tile (or press **Go**) to glide there. Every move finishes with the camera's own exact position move, so it always lands on the saved point.
+4. Optionally type the Ecamm scene name, and tick *Start AI tracking when it arrives* for shots like the sermon. A start point is optional and tucked away; most moves don't need one.
 
 ### Stream Deck setup (Stream Deck → PTZ Flow → Ecamm + camera)
 
@@ -49,7 +65,12 @@ PTZ Flow has to be running. To check that it's listening, open `http://127.0.0.1
 | --- | --- |
 | `/scene/<name>` | switch Ecamm to `<name>` and run the move mapped to it |
 | `/move/<id>` | run a move without touching Ecamm |
+| `/preset/1` … `/preset/4` | go to a preset tile |
+| `/power/on` | wake the camera, wait for start-up, go to the Turn On shot (default: Pulpit close) |
+| `/power/off` | tilt all the way down, zoom all the way out, then standby (keeps dust off the lens) |
+| `/track/on`, `/track/off`, `/track/toggle` | AI tracking (it eases in and out) |
 | `/stop` | hold the camera where it is |
+| `/focus` | focus once on the current shot (One Push) and hold it |
 | `/status` | JSON status |
 
 ## Updating

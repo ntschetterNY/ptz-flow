@@ -6,6 +6,7 @@ public enum Easing: String, Codable, CaseIterable, Sendable {
     case easeInOut
     case gentle
     case drift
+    case silk
 
     public var label: String {
         switch self {
@@ -13,6 +14,7 @@ public enum Easing: String, Codable, CaseIterable, Sendable {
         case .easeInOut: return "Ease in-out"
         case .gentle: return "Gentle S-curve"
         case .drift: return "Slow drift"
+        case .silk: return "Silk"
         }
     }
 
@@ -27,6 +29,9 @@ public enum Easing: String, Codable, CaseIterable, Sendable {
             return t * t * t * (t * (t * 6 - 15) + 10)
         case .drift: // sine
             return -(cos(Double.pi * t) - 1) / 2
+        case .silk: // 7th-order: zero velocity, acceleration and jerk at both ends, so no "kick" leaving or arriving
+            let t4 = t * t * t * t
+            return t4 * (35 + t * (-84 + t * (70 - 20 * t)))
         }
     }
 

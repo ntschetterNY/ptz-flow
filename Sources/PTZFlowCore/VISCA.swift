@@ -76,6 +76,22 @@ public enum VISCA {
     public static let onePushAutoFocus: [UInt8] = [0x81, 0x01, 0x04, 0x18, 0x01, 0xFF]
     public static let focusModeInquiry: [UInt8] = [0x81, 0x09, 0x04, 0x38, 0xFF]
 
+    // MARK: Power
+
+    /// `81 01 04 00 02 FF` on, `... 03 FF` standby. The network stays up in standby, so the camera can be woken.
+    public static func power(on: Bool) -> [UInt8] { [0x81, 0x01, 0x04, 0x00, on ? 0x02 : 0x03, 0xFF] }
+    public static let powerInquiry: [UInt8] = [0x81, 0x09, 0x04, 0x00, 0xFF]
+
+    /// `90 50 02 FF` = on, `90 50 03 FF` = standby.
+    public static func parsePower(_ payload: [UInt8]) -> Bool? {
+        guard payload.count == 4, payload[1] == 0x50, payload[3] == 0xFF else { return nil }
+        switch payload[2] {
+        case 0x02: return true
+        case 0x03: return false
+        default: return nil
+        }
+    }
+
     // MARK: Presets (the camera's own, kept for comparison; recall has no speed control over VISCA)
 
     public static func presetRecall(_ index: Int) -> [UInt8] { [0x81, 0x01, 0x04, 0x3F, 0x02, UInt8(clamp(index, 0, 0x3F)), 0xFF] }

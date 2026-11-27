@@ -36,8 +36,11 @@ public struct Move: Codable, Identifiable, Equatable, Sendable {
     /// Seconds.
     public var duration: Double
     public var easing: Easing
+    /// Hand over to AI tracking once the camera arrives at the end point.
+    public var trackAfterArriving: Bool
 
-    public init(id: String, name: String, ecammScene: String? = nil, start: Pose? = nil, end: Pose, duration: Double, easing: Easing) {
+    public init(id: String, name: String, ecammScene: String? = nil, start: Pose? = nil, end: Pose, duration: Double,
+                easing: Easing, trackAfterArriving: Bool = false) {
         self.id = id
         self.name = name
         self.ecammScene = ecammScene
@@ -45,15 +48,35 @@ public struct Move: Codable, Identifiable, Equatable, Sendable {
         self.end = end
         self.duration = duration
         self.easing = easing
+        self.trackAfterArriving = trackAfterArriving
+    }
+
+    // Older saved moves don't have every field; fill in defaults instead of throwing the file away.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        ecammScene = try c.decodeIfPresent(String.self, forKey: .ecammScene)
+        start = try c.decodeIfPresent(Pose.self, forKey: .start)
+        end = try c.decode(Pose.self, forKey: .end)
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 4
+        easing = (try? c.decodeIfPresent(Easing.self, forKey: .easing)) ?? .silk
+        trackAfterArriving = try c.decodeIfPresent(Bool.self, forKey: .trackAfterArriving) ?? false
+    }
+
+    /// A new, empty move, ready for its points to be captured.
+    public static func blank(named name: String, end: Pose = .home) -> Move {
+        Move(id: UUID().uuidString, name: name, ecammScene: nil, start: nil, end: end, duration: 5, easing: .silk)
     }
 
     /// Placeholder moves. Their poses are zero until captured from the real camera.
     public static let defaults: [Move] = [
-        Move(id: "wide", name: "Full stage wide", ecammScene: "Walk-in", end: .home, duration: 4, easing: .easeInOut),
-        Move(id: "worship", name: "Worship leader", ecammScene: "Worship", end: .home, duration: 3.5, easing: .gentle),
-        Move(id: "pulpit", name: "Pastor at pulpit", ecammScene: "Sermon", end: .home, duration: 3.5, easing: .gentle),
-        Move(id: "prayer", name: "Prayer slow push-in", ecammScene: "Prayer", start: .home, end: .home, duration: 18, easing: .drift),
-        Move(id: "baptism", name: "Baptism tank", ecammScene: "Baptism", end: .home, duration: 4.5, easing: .easeInOut),
+        Move(id: "wide", name: "Full stage wide", ecammScene: "Walk-in", end: .home, duration: 4, easing: .silk),
+        Move(id: "worship", name: "Worship leader", ecammScene: "Worship", end: .home, duration: 3.5, easing: .silk),
+        Move(id: "pulpit", name: "Pulpit close", ecammScene: "Sermon", end: .home, duration: 3.5, easing: .silk,
+             trackAfterArriving: true),
+        Move(id: "prayer", name: "Prayer slow push-in", ecammScene: "Prayer", end: .home, duration: 18, easing: .drift),
+        Move(id: "baptism", name: "Baptism tank", ecammScene: "Baptism", end: .home, duration: 4.5, easing: .silk),
     ]
 }
 
