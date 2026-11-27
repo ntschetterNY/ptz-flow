@@ -60,13 +60,20 @@ extension NDILibrary {
     /// "192.168.1.50, 10.0.0.9" → "192.168.1.50,10.0.0.9", dropping blanks, ports and duplicates.
     public static func extraIPsString(_ ips: [String]) -> String {
         var seen = Set<String>()
-        return ips
-            .flatMap { $0.split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\n" }) }
-            .map { String($0).trimmingCharacters(in: .whitespaces) }
-            .map { $0.split(separator: ":").first.map(String.init) ?? $0 }
-            .filter { !$0.isEmpty && seen.insert($0).inserted }
-            .joined(separator: ",")
+        var out: [String] = []
+        let separators = CharacterSet(charactersIn: ", \n\t")
+        for entry in ips {
+            for piece in entry.components(separatedBy: separators) {
+                let trimmed = piece.trimmingCharacters(in: .whitespaces)
+                let host = trimmed.components(separatedBy: ":").first ?? trimmed
+                if !host.isEmpty, seen.insert(host).inserted {
+                    out.append(host)
+                }
+            }
+        }
+        return out.joined(separator: ",")
     }
+
 }
 
 public final class NDILibrary: @unchecked Sendable {
