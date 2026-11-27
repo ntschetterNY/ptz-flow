@@ -20,7 +20,9 @@ final class AppModel: ObservableObject {
     @Published var moves: [Move]
     @Published private(set) var runningMoveID: String?
     @Published private(set) var progress: Double = 0
-    @Published var focusMode: FocusMode = .smoothAuto
+    @Published var focusMode: FocusMode = FocusMode(rawValue: UserDefaults.standard.string(forKey: "focusMode") ?? "") ?? .smoothAuto {
+        didSet { UserDefaults.standard.set(focusMode.rawValue, forKey: "focusMode") }
+    }
     @Published var isRecording = false
     @Published private(set) var availableUpdate: ReleaseInfo?
     @Published var updateDismissed = false
@@ -114,7 +116,7 @@ final class AppModel: ObservableObject {
         let focus = focusMode
         moveTask = Task { [weak self] in
             await self?.stopTracking(easeOut: true)
-            if focus == .smoothAuto { camera.setAutoFocus(false) } // hold focus during the move
+            if focus != .manual { camera.setAutoFocus(false) } // hold focus during the move (no hunting mid-glide)
             let outcome = await engine.perform(move) { p in
                 Task { @MainActor in self?.progress = p }
             }
@@ -131,15 +133,7 @@ final class AppModel: ObservableObject {
                 break
             }
             if move.trackAfterArriving { self.startTracking() }
-            switch focus {
-            case .smoothAuto:
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                camera.setAutoFocus(true)
-            case .onePush:
-                camera.onePushFocus()
-            case .manual:
-                break
-            }
+            if focus != .manual, !move.trackAfterArriving { await self.lockFocus(camera) }
             // Keep the preset's preview picture current (after focus has settled).
             if outcome == .arrived, let id = runningID, !move.trackAfterArriving {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -197,13 +191,30 @@ final class AppModel: ObservableObject {
     }
 
     func applyFocusMode() {
+        guard let camera else { return }
         switch focusMode {
-        case .manual: camera?.setAutoFocus(false)
-        case .smoothAuto: camera?.setAutoFocus(true)
-        case .onePush:
-            camera?.setAutoFocus(false)
-            camera?.onePushFocus()
+        case .manual: camera.setAutoFocus(false)
+        case .smoothAuto, .onePush: Task { await lockFocus(camera) }
         }
+    }
+
+    /// Focuses once on the shot and then holds it. Continuous autofocus keeps re-checking and can hunt or
+    /// drift on a still shot (and a camera that has just stopped moving), so instead the camera is put in
+    /// manual focus, given a moment to settle, and told to do a single One Push focus. Focus then stays
+    /// put until the next move.
+    func lockFocus(_ camera: PTZCamera) async {
+        camera.setAutoFocus(false)
+        try? await Task.sleep(nanoseconds: 500_000_000) // let any wobble from stopping die away
+        guard !Task.isCancelled else { return }
+        camera.onePushFocus()
+        try? await Task.sleep(nanoseconds: 1_500_000_000) // the lens takes about a second to find focus
+    }
+
+    /// The "Refocus" button and /focus route.
+    func refocus() {
+        guard let camera else { return }
+        addLog("Refocusing")
+        Task { await lockFocus(camera) }
     }
 
     // MARK: Moves
@@ -369,6 +380,7 @@ final class AppModel: ObservableObject {
                 self.addLog("Going to “\(target.name)” at full speed")
                 let outcome = await engine.rush(to: target.end)
                 self.addLog(outcome == .arrived ? "Ready: \(target.name)" : "Turn On: didn't quite reach “\(target.name)”")
+                if self.focusMode != .manual, let camera = self.camera { await self.lockFocus(camera) }
             } else {
                 self.addLog("Turn On: no Turn On shot chosen, so the camera stays where it started")
             }
@@ -404,7 +416,13 @@ final class AppModel: ObservableObject {
     // MARK: AI tracking
 
     func setTracking(_ on: Bool) {
-        if on { startTracking() } else { Task { await stopTracking(easeOut: true) } }
+        if on { startTracking() } else {
+            Task {
+                await stopTracking(easeOut: true)
+                // Back to a still shot: focus once and hold, like after a move.
+                if focusMode != .manual, runningMoveID == nil, let camera { await lockFocus(camera) }
+            }
+        }
     }
 
     func startTracking() {
@@ -425,7 +443,7 @@ final class AppModel: ObservableObject {
         stoppingTracking = false
         trackingEnabled = true
         video.analyse = true
-        if focusMode == .smoothAuto { camera.setAutoFocus(true) }
+        if focusMode != .manual { camera.setAutoFocus(true) } // a moving subject needs continuous focus
         addLog("AI tracking on")
         trackingTask = Task { [weak self] in
             let interval = 1.0 / 20
@@ -535,6 +553,9 @@ final class AppModel: ObservableObject {
             default: return (404, #"{"error":"use /track/on, /track/off or /track/toggle"}"#)
             }
             return (200, "{\"tracking\":\(trackingEnabled)}")
+        case ("focus", 1):
+            refocus()
+            return (200, #"{"ok":true}"#)
         case ("stop", 1):
             stop()
             return (200, #"{"ok":true}"#)

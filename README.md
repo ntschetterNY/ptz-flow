@@ -70,6 +70,7 @@ PTZ Flow has to be running. To check that it's listening, open `http://127.0.0.1
 | `/power/off` | tilt all the way down, zoom all the way out, then standby (keeps dust off the lens) |
 | `/track/on`, `/track/off`, `/track/toggle` | AI tracking (it eases in and out) |
 | `/stop` | hold the camera where it is |
+| `/focus` | focus once on the current shot (One Push) and hold it |
 | `/status` | JSON status |
 
 ## Updating

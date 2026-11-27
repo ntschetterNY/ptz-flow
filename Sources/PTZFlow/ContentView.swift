@@ -357,6 +357,15 @@ struct SideColumn: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .onChange(of: model.focusMode) { _, _ in model.applyFocusMode() }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(model.focusMode == .manual
+                         ? "Focus stays where you set it."
+                         : "Focus holds during a move, then the camera focuses once when it arrives and stays locked. AI tracking uses continuous focus while it follows someone.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button { model.refocus() } label: { Label("Refocus now", systemImage: "scope") }
+                        .help("One Push focus on whatever is in the shot now (Stream Deck: /focus)")
+                }
             }
 
             GroupBox("Stream Deck") {
