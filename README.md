@@ -64,6 +64,8 @@ PTZ Flow has to be running. To check that it's listening, open `http://127.0.0.1
 | `/scene/<name>` | switch Ecamm to `<name>` and run the move mapped to it |
 | `/move/<id>` | run a move without touching Ecamm |
 | `/preset/1` … `/preset/4` | go to a preset tile |
+| `/power/on` | wake the camera, wait for start-up, go to the Turn On shot (default: Pulpit close) |
+| `/power/off` | tilt all the way down, zoom all the way out, then standby (keeps dust off the lens) |
 | `/track/on`, `/track/off`, `/track/toggle` | AI tracking (it eases in and out) |
 | `/stop` | hold the camera where it is |
 | `/status` | JSON status |

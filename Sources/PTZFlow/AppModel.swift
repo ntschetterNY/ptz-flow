@@ -290,6 +290,95 @@ final class AppModel: ObservableObject {
         do { try store.save(moves) } catch { addLog("Couldn't save moves: \(error.localizedDescription)") }
     }
 
+    // MARK: Camera power
+
+    /// What Turn On goes to once the camera is awake. Defaults to the pulpit close shot.
+    @Published var turnOnMoveID: String? = UserDefaults.standard.string(forKey: "turnOnMoveID") {
+        didSet { UserDefaults.standard.set(turnOnMoveID, forKey: "turnOnMoveID") }
+    }
+    /// Shown while Turn On / Turn Off is working, e.g. "Waking camera…".
+    @Published private(set) var powerStatus: String?
+    private var powerTask: Task<Void, Never>?
+
+    /// The saved choice, or the move whose name mentions the pulpit (preferring a "close" one).
+    var resolvedTurnOnMove: Move? {
+        if let id = turnOnMoveID, let m = moves.first(where: { $0.id == id }) { return m }
+        let pulpit = moves.filter { $0.name.localizedCaseInsensitiveContains("pulpit") }
+        return pulpit.first { $0.name.localizedCaseInsensitiveContains("close") } ?? pulpit.first
+    }
+
+    /// Wakes the camera, waits until it has finished starting up, then glides to the Turn On shot.
+    func turnOn() {
+        if camera == nil { connect() }
+        guard let camera else {
+            addLog("Can't turn on: enter the camera's IP address first")
+            return
+        }
+        powerTask?.cancel()
+        powerStatus = "Waking camera…"
+        addLog("Turn On: sending power on")
+        camera.setPower(true)
+        let target = resolvedTurnOnMove
+        powerTask = Task { [weak self] in
+            // A camera coming out of standby takes a while and may run its own start-up pan/tilt check.
+            let deadline = Date().addingTimeInterval(120)
+            var ready = false
+            var lastPose: Pose?
+            var stableFor = 0
+            while !Task.isCancelled, Date() < deadline {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard await camera.readPower() == true, let pose = await camera.readPose() else {
+                    camera.setPower(true) // in case the first command arrived while it was still booting
+                    continue
+                }
+                stableFor = (pose == lastPose) ? stableFor + 1 : 0
+                lastPose = pose
+                if stableFor >= 2 { ready = true; break } // stopped moving for 2 s: start-up is done
+                await MainActor.run { self?.powerStatus = "Camera starting up…" }
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.connected = ready
+            guard ready else {
+                self.powerStatus = nil
+                self.addLog("Turn On: the camera didn't report ready within 2 minutes")
+                return
+            }
+            self.addLog("Camera is on")
+            self.powerStatus = nil
+            if let target {
+                self.run(moveID: target.id)
+            } else {
+                self.addLog("Turn On: no Turn On shot chosen, so the camera stays where it started")
+            }
+            if self.video.frame == nil { self.video.findAndConnect(cameraHost: self.cameraHost) }
+        }
+    }
+
+    /// Parks the camera (lens all the way down, zoomed all the way out, to keep dust off), then powers it off.
+    func turnOff() {
+        guard let camera, let engine else {
+            addLog("Can't turn off: camera not connected")
+            return
+        }
+        powerTask?.cancel()
+        moveTask?.cancel()
+        runningMoveID = nil
+        powerStatus = "Parking camera…"
+        addLog("Turn Off: tilting down and zooming out")
+        powerTask = Task { [weak self] in
+            await self?.stopTracking(easeOut: false)
+            let parked = await engine.park()
+            guard let self, !Task.isCancelled else { return }
+            if let parked { self.addLog("Parked at tilt \(parked.tilt), zoom \(parked.zoom)") }
+            camera.setPower(false)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            let on = await camera.readPower()
+            self.powerStatus = nil
+            self.connected = false
+            self.addLog(on == false ? "Camera is off (standby)" : "Sent power off")
+        }
+    }
+
     // MARK: AI tracking
 
     func setTracking(_ on: Bool) {
@@ -400,6 +489,13 @@ final class AppModel: ObservableObject {
         switch (route.first, route.count) {
         case ("scene", 2):
             trigger(scene: route[1])
+            return (200, #"{"ok":true}"#)
+        case ("power", 2):
+            switch route[1].lowercased() {
+            case "on": turnOn()
+            case "off": turnOff()
+            default: return (404, #"{"error":"use /power/on or /power/off"}"#)
+            }
             return (200, #"{"ok":true}"#)
         case ("preset", 2):
             guard let n = Int(route[1]), n >= 1, n <= min(4, moves.count) else { return (404, #"{"error":"use /preset/1 to /preset/4"}"#) }

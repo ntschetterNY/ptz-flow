@@ -215,6 +215,31 @@ public final class MoveEngine: @unchecked Sendable {
         return await perform(move, progress: progress)
     }
 
+    /// Parks the camera for the week: tilts all the way down (lens facing the floor, away from dust) and zooms
+    /// all the way out. Drives until the camera stops moving on its limits, then stops. Returns where it ended.
+    @discardableResult
+    public func park(tiltSpeed: Int = 60, timeout: TimeInterval = 25) async -> Pose? {
+        let started = Date()
+        var last = await readPose()
+        var still = 0
+        while !Task.isCancelled, Date().timeIntervalSince(started) < timeout {
+            // Ease up to speed over the first half second.
+            let ramp = min(Date().timeIntervalSince(started) / 0.5, 1)
+            camera.drive(panSpeed: 0, tiltSpeed: -max(1, Int(Double(tiltSpeed) * ramp)), zoomSpeed: -7)
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard let p = await camera.readPose() else { continue }
+            if let l = last, abs(p.tilt - l.tilt) <= 1, abs(p.zoom - l.zoom) <= 4 {
+                still += 1
+            } else {
+                still = 0
+            }
+            last = p
+            if still >= 5 { break } // both axes have been at their limits for ~0.75 s
+        }
+        camera.stopAll()
+        return await readPose() ?? last
+    }
+
     /// Off-air repositioning time: quick, but still eased. 1 to 3 seconds depending on distance.
     static func repositionTime(_ a: Pose, _ b: Pose) -> Double {
         let d = max(Double(abs(a.pan - b.pan)) / 1500, Double(abs(a.tilt - b.tilt)) / 900, Double(abs(a.zoom - b.zoom)) / 6000)

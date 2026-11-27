@@ -19,6 +19,9 @@ struct ContentView: View {
             .padding(16)
         }
         .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                PowerButtons()
+            }
             ToolbarItem(placement: .primaryAction) {
                 Toggle(isOn: $model.isRecording) {
                     Label(model.isRecording ? "Recording" : "Record", systemImage: "record.circle")
@@ -342,6 +345,7 @@ struct SideColumn: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            TurnOnSetting()
             TrackingPanel()
 
             GroupBox("Activity") {
@@ -435,6 +439,49 @@ struct PreviewPanel: View {
             .stroke(color, lineWidth: width)
             .frame(width: r.width * size.width, height: r.height * size.height)
             .position(x: r.midX * size.width, y: r.midY * size.height)
+    }
+}
+
+struct PowerButtons: View {
+    @EnvironmentObject var model: AppModel
+    @State private var confirmOff = false
+
+    var body: some View {
+        Button { model.turnOn() } label: { Label("Turn On", systemImage: "power") }
+            .help("Wake the camera and go to the Turn On shot")
+        Button { confirmOff = true } label: { Label("Turn Off", systemImage: "moon.zzz") }
+            .help("Tilt all the way down, zoom all the way out, then put the camera in standby")
+            .confirmationDialog("Turn the camera off?", isPresented: $confirmOff) {
+                Button("Park and turn off", role: .destructive) { model.turnOff() }
+            } message: {
+                Text("The camera tilts all the way down and zooms all the way out (to keep dust off the lens), then goes to standby.")
+            }
+        if let status = model.powerStatus {
+            ProgressView().controlSize(.small)
+            Text(status).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct TurnOnSetting: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        GroupBox("Camera power") {
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("After Turn On, go to", selection: Binding(
+                    get: { model.resolvedTurnOnMove?.id ?? "" },
+                    set: { model.turnOnMoveID = $0.isEmpty ? nil : $0 }
+                )) {
+                    Text("Stay where it starts").tag("")
+                    ForEach(model.moves) { Text($0.name).tag($0.id) }
+                }
+                .font(.caption)
+                Text("Turn Off parks the lens facing down and zoomed out, then powers off. Stream Deck: /power/on and /power/off")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 

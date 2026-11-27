@@ -10,6 +10,9 @@ public protocol PTZCamera: AnyObject, Sendable {
     func onePushFocus()
     /// Exact landing: the camera's own absolute position move, at a slow speed (1...24).
     func moveAbsolute(to pose: Pose, speed: Int)
+    func setPower(_ on: Bool)
+    /// true = on, false = standby, nil = no answer.
+    func readPower() async -> Bool?
 }
 
 /// A BirdDog PTZ camera controlled over VISCA-over-IP.
@@ -75,6 +78,17 @@ public final class BirdDogCamera: PTZCamera, @unchecked Sendable {
         lastZoomSpeed = 0
         lastPanTilt = (0, 0)
         lastPanTiltSent = Date()
+    }
+
+    public func setPower(_ on: Bool) {
+        client.command(VISCA.power(on: on))
+    }
+
+    public func readPower() async -> Bool? {
+        await inquiries.acquire()
+        defer { Task { await inquiries.release() } }
+        guard let reply = await client.inquire(VISCA.powerInquiry, replyLength: 4) else { return nil }
+        return VISCA.parsePower(reply)
     }
 
     public func setAutoFocus(_ on: Bool) {

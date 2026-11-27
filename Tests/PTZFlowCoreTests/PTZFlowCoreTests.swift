@@ -224,6 +224,8 @@ final class SimulatedCamera: PTZCamera, @unchecked Sendable {
         p.pan += Double(v.pan) * c.panUnitsPerSecondPerStep * speedScale * dt
         p.tilt += Double(v.tilt) * c.tiltUnitsPerSecondPerStep * speedScale * dt
         p.zoom += Double(v.zoom) * c.zoomUnitsPerSecondPerStep * speedScale * dt
+        p.tilt = max(p.tilt, tiltMin)
+        p.zoom = max(p.zoom, zoomMin)
     }
 
     func readPose() async -> Pose? {
@@ -258,6 +260,12 @@ final class SimulatedCamera: PTZCamera, @unchecked Sendable {
 
     func setAutoFocus(_ on: Bool) {}
     func onePushFocus() {}
+    private(set) var powerOn = true
+    func setPower(_ on: Bool) { powerOn = on }
+    func readPower() async -> Bool? { powerOn }
+    /// Mechanical limits, like the real camera's end stops.
+    var tiltMin = -1_000_000.0
+    var zoomMin = 0.0
 }
 
 final class LandingTests: XCTestCase {
@@ -291,6 +299,28 @@ final class LandingTests: XCTestCase {
         l.commanded(MotionMath.Command(panStep: 1, tiltStep: 0, zoomStep: 0), dt: 0.05)
         l.observe(Pose(pan: 50, tilt: 0, zoom: 0))
         XCTAssertEqual(l.updated(MotionCalibration()), MotionCalibration())
+    }
+}
+
+final class PowerTests: XCTestCase {
+    func testPowerBytes() {
+        XCTAssertEqual(VISCA.power(on: true), [0x81, 0x01, 0x04, 0x00, 0x02, 0xFF])
+        XCTAssertEqual(VISCA.power(on: false), [0x81, 0x01, 0x04, 0x00, 0x03, 0xFF])
+        XCTAssertEqual(VISCA.parsePower([0x90, 0x50, 0x02, 0xFF]), true)
+        XCTAssertEqual(VISCA.parsePower([0x90, 0x50, 0x03, 0xFF]), false)
+        XCTAssertNil(VISCA.parsePower([0x90, 0x50, 0x00, 0x00, 0xFF]))
+    }
+
+    func testParkTiltsFullyDownAndZoomsOut() async {
+        let cam = SimulatedCamera()
+        cam.tiltMin = -400
+        cam.moveAbsolute(to: Pose(pan: 120, tilt: 50, zoom: 1500), speed: 24)
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        let engine = MoveEngine(camera: cam)
+        let end = await engine.park(tiltSpeed: 100, timeout: 10)
+        XCTAssertEqual(end?.tilt, -400)
+        XCTAssertEqual(end?.zoom, 0)
+        XCTAssertEqual(end?.pan, 120)
     }
 }
 
