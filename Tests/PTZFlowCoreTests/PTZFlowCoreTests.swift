@@ -284,7 +284,7 @@ final class CoordinationTests: XCTestCase {
                                        measured: [0.2, nil, 0.6], lead: 0.05)
         XCTAssertTrue(r.held)
         XCTAssertEqual(r.pose.pan, 500)
-        XCTAssertEqual(r.pose.zoom, 2000)
+        XCTAssertEqual(r.pose.zoom, 4800) // waits where it is (60%), never backs up
         XCTAssertEqual(r.zoomVelocity, 0)
         XCTAssertGreaterThan(r.panVelocity, 0)
     }

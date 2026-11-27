@@ -87,8 +87,9 @@ public enum MotionMath {
             if let slowest = known.min() {
                 for i in 0..<3 {
                     guard let mine = measured[i], mine > slowest + lead * 0.5 else { continue }
-                    let cap = min(slowest + lead, 1)
-                    if cap < planned { fractions[i] = cap; rates[i] = 0; held = true }
+                    // Wait where it is (never back up: that would make the axes take turns holding each other).
+                    let wait = min(slowest + lead, 1)
+                    if wait < planned { fractions[i] = max(wait, min(mine, 1)); rates[i] = 0; held = true }
                 }
             }
         }
