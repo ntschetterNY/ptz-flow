@@ -380,13 +380,23 @@ public final class MoveEngine: @unchecked Sendable {
                 lastUsed = reading.at
                 measured = reading.pose
                 learner.observe(reading.pose)
+                // Adjust each axis's speed conversion to what this camera is really doing right now.
+                let live = learner.liveRates()
+                func adapt(_ old: Double, _ measured: Double?, _ base: Double) -> Double {
+                    guard let m = measured else { return old }
+                    return old + 0.15 * (min(max(m, base / 4), base * 4) - old)
+                }
+                c.panUnitsPerSecondPerStep = adapt(c.panUnitsPerSecondPerStep, live.pan, calibration.panUnitsPerSecondPerStep)
+                c.tiltUnitsPerSecondPerStep = adapt(c.tiltUnitsPerSecondPerStep, live.tilt, calibration.tiltUnitsPerSecondPerStep)
+                c.zoomUnitsPerSecondPerStep = adapt(c.zoomUnitsPerSecondPerStep, live.zoom, calibration.zoomUnitsPerSecondPerStep)
                 let then = reading.at.timeIntervalSince(started) - (c.latency - camera.latencyEstimate / 2)
                 reference = MotionMath.coordinated(from: from, to: to, duration: duration, easing: easing,
                                                    progress: duration > 0 ? min(max(then / duration, 0), 1) : 1,
                                                    measured: along, lead: lead).pose
             }
-            let v = MotionMath.velocity(target: reference, panVelocity: now.panVelocity, tiltVelocity: now.tiltVelocity,
-                                        zoomVelocity: now.zoomVelocity, measured: measured, calibration: c)
+            let ff = p >= 1 ? 0.0 : 1.0 // after the plan ends, only close the remaining gap
+            let v = MotionMath.velocity(target: reference, panVelocity: now.panVelocity * ff, tiltVelocity: now.tiltVelocity * ff,
+                                        zoomVelocity: now.zoomVelocity * ff, measured: measured, calibration: c)
             let cmd = shaper.shape(v, dt: interval)
             camera.drive(panSpeed: cmd.panStep, tiltSpeed: cmd.tiltStep, zoomSpeed: cmd.zoomStep)
             learner.commanded(cmd, dt: interval)
@@ -472,6 +482,20 @@ public struct CalibrationLearner: Sendable {
         panStepSeconds += Double(cmd.panStep) * dt
         tiltStepSeconds += Double(cmd.tiltStep) * dt
         zoomStepSeconds += Double(cmd.zoomStep) * dt
+    }
+
+    /// The rates measured so far in this move (units per second per speed step), or nil while too little has
+    /// moved to tell. Used during a glide so an axis that runs faster or slower than calibrated is corrected
+    /// within a fraction of a second, which keeps all axes at the same percentage.
+    public func liveRates() -> (pan: Double?, tilt: Double?, zoom: Double?) {
+        func rate(_ moved: Int, _ stepSeconds: Double, _ minStepSeconds: Double, _ minMoved: Int) -> Double? {
+            guard abs(stepSeconds) >= minStepSeconds, abs(moved) >= minMoved,
+                  (Double(moved) > 0) == (stepSeconds > 0) else { return nil }
+            return Double(moved) / stepSeconds
+        }
+        return (rate(latest.pan - start.pan, panStepSeconds, 6, 30),
+                rate(latest.tilt - start.tilt, tiltStepSeconds, 6, 30),
+                rate(latest.zoom - start.zoom, zoomStepSeconds, 1.5, 300))
     }
 
     /// Blends each measured rate halfway into the calibration, ignoring tiny moves and wild readings.
