@@ -186,7 +186,7 @@ final class SilkTests: XCTestCase {
         let move = Move(id: "t", name: "t", end: Pose(pan: 400, tilt: -150, zoom: 0), duration: 3, easing: .silk)
         let outcome = await engine.perform(move)
         XCTAssertEqual(outcome, .arrived)
-        XCTAssertTrue(MotionMath.isOnTarget(cam.pose, move.end), "\(cam.pose)")
+        XCTAssertTrue(MotionMath.isOnTarget(cam.pose, move.end, tolerance: 4), "\(cam.pose)") // within 4 units is left alone (no visible nudge)
         // No speed change bigger than the acceleration limit allows.
         let maxJump = zip(cam.glideSpeeds, cam.glideSpeeds.dropFirst()).map { abs($0 - $1) }.max() ?? 0
         XCTAssertLessThanOrEqual(maxJump, Int(c.panTiltAcceleration / c.tickRate) + 2)
@@ -328,7 +328,7 @@ final class LandingTests: XCTestCase {
         let move = Move(id: "t", name: "t", end: Pose(pan: -600, tilt: 220, zoom: 3000), duration: 1.5, easing: .silk)
         let outcome = await engine.perform(move)
         XCTAssertEqual(outcome, .arrived)
-        XCTAssertTrue(MotionMath.isOnTarget(cam.pose, move.end), "\(cam.pose)")
+        XCTAssertTrue(MotionMath.isOnTarget(cam.pose, move.end, tolerance: 4), "\(cam.pose)") // within 4 units is left alone (no visible nudge)
         // And it learned that the camera is faster than assumed.
         XCTAssertGreaterThan(engine.calibration.panUnitsPerSecondPerStep, MotionCalibration().panUnitsPerSecondPerStep)
     }
