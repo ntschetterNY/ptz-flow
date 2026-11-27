@@ -412,7 +412,7 @@ public final class MoveEngine: @unchecked Sendable {
             try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
         }
         camera.stopAll()
-        if !Task.isCancelled, let end = await camera.readPose() {
+        if !Task.isCancelled, let end = await readPose() {
             learner.observe(end)
             let learned = learner.updated(calibration)
             if learned != calibration {
